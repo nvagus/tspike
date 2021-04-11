@@ -25,10 +25,13 @@ class AutoMatchingMatrix:
         }
 
         matching = algorithm.find_matching(G, matching_type='max', return_type='list')
-        matching = {
-            int(output.split('-')[1]): int(label.split('-')[1])
-            for (label, output), _ in matching
-        }
+        if matching:
+            matching = {
+                int(output.split('-')[1]): int(label.split('-')[1])
+                for (label, output), _ in matching
+            }
+        else:
+            matching = {}
 
         tp = np.zeros(self.n_labels)
         fp = np.zeros(self.n_labels)
@@ -39,7 +42,8 @@ class AutoMatchingMatrix:
             fp[label] += self.mat[:, output].sum() - self.mat[label, output]
         
         fn = self.mat.sum(axis=1) - tp
-        accuracy = tp.sum() / (tp + fn).sum()
+        
+        accuracy = tp.sum() / self.mat.sum()
         # micro precision and recall
         precision = (tp / (tp + fp)).mean()
         recall = (tp / (tp + fn)).mean()
