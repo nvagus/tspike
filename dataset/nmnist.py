@@ -25,6 +25,8 @@ def load_as_indices(filepath, sample_rate):
 def indices_to_matrix(mat, x_max, y_max, t_max):
     result = torch.zeros(2, x_max, y_max, t_max, dtype=torch.int32)
     for t, p, x, y in mat.T:
+        if t >= t_max:
+            continue
         result[p, x, y, t] = 1
     return result
 
