@@ -1,10 +1,11 @@
+from tnn.configs import MAX_WEIGHT
 import click
 import torch
 from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm
 
 from dataset import NMnistSampled
-from tnn import AutoMatchingMatrix, FullColumn
+from tnn import AutoMatchingMatrix, FullColumn, set_device
 
 
 @click.command()
@@ -14,13 +15,13 @@ from tnn import AutoMatchingMatrix, FullColumn
 @click.option('-x', '--x-max', default=34)
 @click.option('-y', '--y-max', default=34)
 @click.option('-t', '--t-max', default=256)
-@click.option('-w', '--w-max', default=16)
 @click.option('--train-path', default='data/n-mnist/TrainSP')
 @click.option('--test-path', default='data/n-mnist/TestSP')
+@click.option('--model-path', default='model/n-mnist-1')
 def main(
     gpu, batch, epochs,
-    x_max, y_max, t_max, w_max,
-    train_path, test_path,
+    x_max, y_max, t_max,
+    train_path, test_path, model_path,
     **kwargs
 ):
     if torch.cuda.is_available():  
@@ -28,32 +29,39 @@ def main(
     else:  
         dev = 'cpu'
     device = torch.device(dev)
+    set_device(device)
+    
     
     train_data_loader = DataLoader(NMnistSampled(train_path, x_max, y_max, t_max), shuffle=True, batch_size=batch)
     test_data_loader = DataLoader(NMnistSampled(test_path, x_max, y_max, t_max), batch_size=batch)
 
-    model = FullColumn(
-        x_max * y_max, 10, input_channel=2, 
-        w_max=w_max, fodep=t_max, dense=20, device=device)
+    model = FullColumn(x_max * y_max, 10, input_channel=2, output_channel=1, dense=20, fodep=t_max)
+    
     auto_matcher = AutoMatchingMatrix(10, 10)
 
     for epoch in range(epochs):
         print(f"epoch: {epoch}")
-        for sample in tqdm(train_data_loader):
+        train_data_iterator = tqdm(train_data_loader)
+        train_data_iterator.set_description(f'weight: {model.weight.sum()}')
+        for i, sample in enumerate(tqdm(train_data_loader)):
             input_spikes = sample['data'].reshape(batch, 2, x_max * y_max, t_max).to(device)
-            output_spikes = model.forward(input_spikes)
+            output_spikes = model.forward(input_spikes, sample['label'])
             model.stdp(input_spikes, output_spikes)
+            train_data_iterator.set_description(f'weight: {model.weight.sum()}')
+            if i ==999:
+                break
         
         for sample in tqdm(test_data_loader):
             input_spikes = sample['data'].reshape(batch, 2, x_max * y_max, t_max).to(device)
             output_spikes = model.forward(input_spikes)
             for output_spike in output_spikes:
-                prediction = output_spike.sum(axis=-1).argmax()
+                prediction = output_spike.sum(axis=(-1, -3)).argmax()
                 auto_matcher.add_sample(sample['label'], prediction)
         
         print(auto_matcher.mat)
         auto_matcher.describe_print_clear()
         print(f'weight sum: {model.weight.sum()}')
+        torch.save(model.state_dict, model_path)
 
     return 0
 
