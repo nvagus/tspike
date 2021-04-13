@@ -88,18 +88,22 @@ def main(
     if model == 'linear':
         model = LinearModel(x_max * y_max, 10).to(device)
         def transform(data):
+            batch = data.shape[0]
             return data.reshape(batch, 2, x_max * y_max, t_max).to(device).sum(axis=(-1, -3)).float()
     elif model == 'linear_t':
         model = LinearModel(2 * x_max * y_max * t_max, 10).to(device)
         def transform(data):
+            batch = data.shape[0]
             return data.reshape(batch, 2 * x_max * y_max * t_max).to(device).float()
     elif model == 'conv':
         model = ConvModel(2, 16, (x_max, y_max), 10).to(device)
         def transform(data):
+            batch = data.shape[0]
             return data.reshape(batch, 2, x_max, y_max, t_max).to(device).sum(axis=-1).float()
     elif model == 'conv_gru_t':
         model = ConvGRUModel(2, 16, (x_max, y_max), 10).to(device)
         def transform(data):
+            batch = data.shape[0]
             return data.reshape(batch, 2, x_max, y_max, t_max).to(device).float()
     else:
         return 255
@@ -124,7 +128,7 @@ def main(
         auto_matcher = AutoMatchingMatrix(10, 10)
         for sample in tqdm(test_data_loader):
             data = transform(sample['data'])
-            labels = sample['label'].to(device)
+            labels = sample['label']
             output = model.forward(data).argmax(axis=-1).cpu()
             for y_pred, y_true in zip(output, labels):
                 auto_matcher.add_sample(y_true, y_pred)
