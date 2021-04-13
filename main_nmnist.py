@@ -37,26 +37,24 @@ def main(
 
     model = FullColumn(x_max * y_max, 10, input_channel=2, output_channel=1, dense=20, fodep=t_max)
     
-    auto_matcher = AutoMatchingMatrix(10, 10)
 
     for epoch in range(epochs):
         print(f"epoch: {epoch}")
         train_data_iterator = tqdm(train_data_loader)
         train_data_iterator.set_description(f'weight: {model.weight.sum()}')
-        for i, sample in enumerate(tqdm(train_data_loader)):
+        for i, sample in enumerate(train_data_iterator):
             input_spikes = sample['data'].reshape(batch, 2, x_max * y_max, t_max).to(device)
             output_spikes = model.forward(input_spikes, sample['label'])
             model.stdp(input_spikes, output_spikes)
             train_data_iterator.set_description(f'weight: {model.weight.sum()}')
-            if i ==999:
-                break
         
+        auto_matcher = AutoMatchingMatrix(10, 10)
         for sample in tqdm(test_data_loader):
             input_spikes = sample['data'].reshape(batch, 2, x_max * y_max, t_max).to(device)
             output_spikes = model.forward(input_spikes)
-            for output_spike in output_spikes:
+            for output_spike, label in zip(output_spikes, sample['label']):
                 prediction = output_spike.sum(axis=(-1, -3)).argmax()
-                auto_matcher.add_sample(sample['label'], prediction)
+                auto_matcher.add_sample(label, prediction)
         
         print(auto_matcher.mat)
         auto_matcher.describe_print_clear()

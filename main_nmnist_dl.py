@@ -1,11 +1,13 @@
 import click
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm
-from tnn import AutoMatchingMatrix
 
 from dataset import NMnistSampled
+from tnn import AutoMatchingMatrix
+
 
 class LinearModel(nn.Module):
     def __init__(self, input_size, output_size):
@@ -18,6 +20,42 @@ class LinearModel(nn.Module):
         return logits
 
 
+class ConvModel(nn.Module):
+    def __init__(self, input_channels, output_channels, input_size, output_size, kernel_size=3, stride=2):
+        super(ConvModel, self).__init__()
+        self.conv_layer = nn.Conv2d(input_channels, output_channels, kernel_size=kernel_size, stride=stride)
+        self.lienar_layer = nn.Linear(
+            output_channels * 
+            int(np.floor((input_size[0] - kernel_size) / stride + 1)) * 
+            int(np.floor((input_size[1] - kernel_size) / stride + 1)), 
+            output_size)
+    
+    def forward(self, input_data):
+        conv_output = self.conv_layer(input_data)
+        linear_output = self.lienar_layer(nn.functional.relu(conv_output).flatten(start_dim=1))
+        logits = torch.log_softmax(linear_output, dim=1)
+        return logits
+
+
+class ConvGRUModel(nn.Module):
+    def __init__(self, input_channels, output_channels, input_size, output_size, kernel_size=3, stride=2):
+        super(ConvGRUModel, self).__init__()
+        self.conv_layer = nn.Conv2d(input_channels, output_channels, kernel_size=kernel_size, stride=stride)
+        self.gru_layer = nn.GRU(
+            output_channels * 
+            int(np.floor((input_size[0] - kernel_size) / stride + 1)) * 
+            int(np.floor((input_size[1] - kernel_size) / stride + 1)),
+            output_size)
+    
+    def forward(self, input_data):
+        batch, channel, x, y, t = input_data.shape
+        input_data = input_data.permute(4, 0, 1, 2, 3).reshape(-1, channel, x, y)
+        conv_output = self.conv_layer(input_data).reshape(t, batch, -1)
+        gru_output, _ = self.gru_layer(
+            nn.functional.relu(conv_output), 
+            torch.zeros(1, batch, self.gru_layer.hidden_size).to(conv_output.device))
+        logits = torch.log_softmax(gru_output[-1], dim=1)
+        return logits
 
 
 @click.command()
@@ -55,6 +93,14 @@ def main(
         model = LinearModel(2 * x_max * y_max * t_max, 10).to(device)
         def transform(data):
             return data.reshape(batch, 2 * x_max * y_max * t_max).to(device).float()
+    elif model == 'conv':
+        model = ConvModel(2, 16, (x_max, y_max), 10).to(device)
+        def transform(data):
+            return data.reshape(batch, 2, x_max, y_max, t_max).to(device).sum(axis=-1).float()
+    elif model == 'conv_gru_t':
+        model = ConvGRUModel(2, 16, (x_max, y_max), 10).to(device)
+        def transform(data):
+            return data.reshape(batch, 2, x_max, y_max, t_max).to(device).float()
     else:
         return 255
 
@@ -64,12 +110,14 @@ def main(
 
     for epoch in range(epochs):
         print(f"epoch: {epoch}")
-        for sample in tqdm(train_data_loader):
+        training = tqdm(train_data_loader)
+        for sample in training:
             data = transform(sample['data'])
             labels = sample['label'].to(device)
             optimizer.zero_grad()
             output = model.forward(data)
             loss = error(output, labels.cuda())
+            training.set_description(f'loss={loss.detach().cpu().numpy():.4f}')
             loss.backward()
             optimizer.step()
             
