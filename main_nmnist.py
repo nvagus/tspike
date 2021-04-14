@@ -19,17 +19,22 @@ class Interrupter:
 
 @click.command()
 @click.option('-g', '--gpu', default=0)
-@click.option('-e', '--epochs', default=10)
-@click.option('-b', '--batch', default=1)
+@click.option('-e', '--epochs', default=1)
+@click.option('-b', '--batch', default=32)
 @click.option('-x', '--x-max', default=34)
 @click.option('-y', '--y-max', default=34)
 @click.option('-t', '--t-max', default=256)
+@click.option('-f', '--forced-dep', default=0)
+@click.option('-d', '--dense', default=0.15)
+@click.option('-w', '--w-init', default=0.5)
+@click.option('-S/-U', '--supervised/--unsupervised', default=True)
 @click.option('--train-path', default='data/n-mnist/TrainSP')
 @click.option('--test-path', default='data/n-mnist/TestSP')
 @click.option('--model-path', default='model/n-mnist-1')
 def main(
-    gpu, batch, epochs,
-    x_max, y_max, t_max,
+    gpu, batch, epochs, supervised,
+    x_max, y_max, t_max, 
+    forced_dep, dense, w_init,
     train_path, test_path, model_path,
     **kwargs
 ):
@@ -38,37 +43,54 @@ def main(
     else:  
         dev = 'cpu'
     device = torch.device(dev)
-    
+
+    print(f'Device: {device}, Batch: {batch}, Epochs: {epochs}, Supervised: {supervised}')
+    print(f'Forced Dep: {forced_dep}, Dense: {dense}, Weight Init: {w_init}')
+
     train_data_loader = DataLoader(NMnistSampled(train_path, x_max, y_max, t_max, device=device), shuffle=True, batch_size=batch)
     test_data_loader = DataLoader(NMnistSampled(test_path, x_max, y_max, t_max, device=device), batch_size=batch)
 
-    model = FullColumn(x_max * y_max, 10, input_channel=2, output_channel=1, dense=0.4, fodep=t_max).to(device)
+    model = FullColumn(
+        x_max * y_max, 10, input_channel=2, output_channel=1, 
+        dense=dense, fodep=forced_dep, w_init=w_init
+    ).to(device)
     
+    def descriptor():
+        return ','.join('{:.0f}'.format(x) for x in model.weight.sum(axis=1))
 
     for epoch in range(epochs):
         print(f"epoch: {epoch}")
         train_data_iterator = tqdm(train_data_loader)
-        train_data_iterator.set_description(f'weight: {model.weight.sum():.4f}')
+        train_data_iterator.set_description(descriptor())
         with Interrupter():
             for data, label in train_data_iterator:
-                input_spikes = data.reshape(batch, 2, x_max * y_max, t_max)
-                output_spikes = model.forward(input_spikes, label.to(device))
+                input_spikes = data.reshape(-1, 2, x_max * y_max, t_max)
+                if supervised:
+                    output_spikes = model.forward(input_spikes, label.to(device))
+                else:
+                    output_spikes = model.forward(input_spikes)
                 model.stdp(input_spikes, output_spikes)
-                train_data_iterator.set_description(f'weight: {model.weight.sum():.4f}')
+                accurate = (output_spikes.sum((-3, -2, -1)) > 0).logical_and(output_spikes.sum((-3, -1)).argmax(-1) == label.to(device)).sum()
+                train_data_iterator.set_description(f'{descriptor()}; {output_spikes.sum()}, {accurate}')
         
         auto_matcher = AutoMatchingMatrix(10, 10)
         with Interrupter():
             for data, label in tqdm(test_data_loader):
-                input_spikes = data.reshape(batch, 2, x_max * y_max, t_max)
+                input_spikes = data.reshape(-1, 2, x_max * y_max, t_max)
                 output_spikes = model.forward(input_spikes)
-                for output_spike, label in zip(output_spikes.cpu().numpy(), label.numpy()):
-                    prediction = output_spike.sum(axis=(-1, -3)).argmax()
-                    auto_matcher.add_sample(label, prediction)
+
+                has_spikes = output_spikes.sum((-3, -2, -1)) > 0
+                y_preds = output_spikes.sum((-3, -1)).argmax(-1)
+
+                for has_spike, y_pred, y_true in zip(has_spikes.cpu().numpy(), y_preds.cpu().numpy(), label.numpy()):
+                    if has_spike:
+                        auto_matcher.add_sample(y_true, y_pred)
         
         print(auto_matcher.mat)
+        print(f'Coverage: {auto_matcher.mat.sum() / len(test_data_loader.dataset)}')
         auto_matcher.describe_print_clear()
-        print(f'weight sum: {model.weight.sum()}')
-        torch.save(model.state_dict, model_path)
+        print(f'Weight sum: {model.weight.sum()}')
+        torch.save(model.state_dict(), model_path)
 
     return 0
 
