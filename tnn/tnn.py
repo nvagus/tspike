@@ -139,7 +139,7 @@ class FullColumn(torch.nn.Module):
         self.weight = (self.weight + update).clip(0, 1)
         # adjust bias
         weight_sum = self.weight.sum(1)
-        if weight_sum.all():
+        if (weight_sum > 0).all():
             self.bias = self.theta * (keep_bias +  (1 - keep_bias) * self.output_channel * self.neurons * weight_sum / weight_sum.sum())
         else:
             self.bias[:] = self.theta
