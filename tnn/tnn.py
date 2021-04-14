@@ -48,12 +48,13 @@ class FullColumn(torch.nn.Module):
         assert fodep >= self.response_function.fodep, f'forced depression should be at least {self.response_function.fodep}'
         # initialize weight to zeros first
         self.weight = torch.zeros(self.output_channel * self.neurons, self.input_channel * self.synapses) + w_init
-
+        self.bias = torch.zeros(self.output_channel * self.neurons) + self.theta
         print(f'Building full connected TNN layer with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}')
     
     def to(self, device):
         super(FullColumn, self).to(device)
         self.weight = self.weight.to(device)
+        self.bias = self.bias.to(device)
         return self
 
     def forward(self, input_spikes, labels=None):
@@ -73,11 +74,11 @@ class FullColumn(torch.nn.Module):
         if labels is not None:
             batch, channel, neurons, time = potentials.shape
             supervision = torch.zeros(batch, neurons, dtype=torch.int32, device=labels.device).scatter(
-                1, labels.unsqueeze(-1), self.theta // 2
-            ).unsqueeze(1).expand(-1, channel, -1).unsqueeze(-1)
+                1, labels.unsqueeze(-1), 1
+            ).unsqueeze(1).expand(-1, channel, -1).unsqueeze(-1) * 0.5 * self.bias[labels].reshape(-1, 1, 1, 1)
             potentials = potentials + supervision
         else:
-            potentials = potentials + self.theta // 2
+            potentials = potentials + 0.5 * self.bias.reshape(1, 1, -1, 1)
         return potentials
 
     def winner_takes_all(self, potentials):
@@ -92,7 +93,7 @@ class FullColumn(torch.nn.Module):
         # iterate time axis: get the winner for each batch, channel of neurons, update winners and depression
         for t in range(time):
             winner_t = potentials[t].argmax(axis=-1).unsqueeze(-1)
-            spike_t = (potentials[t].gather(-1, winner_t) > self.theta).squeeze(-1)
+            spike_t = (potentials[t] > self.bias).gather(-1, winner_t).squeeze(-1)
             cond_t = spike_t.logical_and(depression == min_depression).int()
             winners[t].scatter_(-1, winner_t, cond_t.unsqueeze(-1))
             depression = min_depression.max(depression + winners[t].sum(axis=-1) * (self.fodep + 1) - 1)
@@ -102,7 +103,8 @@ class FullColumn(torch.nn.Module):
     def stdp(
         self, 
         input_spikes, output_spikes, 
-        mu_capture=0.0200, mu_backoff=-0.0200, mu_search=0.0001
+        mu_capture=0.0200, mu_backoff=-0.0200, mu_search=0.0001,
+        keep_bias=1.0
     ):
         batch, channel_i, synapses, time_i = input_spikes.shape
         batch, channel_o, neurons, time_o = output_spikes.shape
@@ -113,7 +115,7 @@ class FullColumn(torch.nn.Module):
         input_spike_acc = torch.cumsum(input_spikes, dim=0)
         input_spike_acc = torch.cat((torch.zeros_like(input_spike_acc[0]).unsqueeze(0), input_spike_acc), 0)
         history = torch.zeros_like(self.weight)
-
+        # compute capture and search
         for t in range(time_i):
             has_spike_i = input_spikes[t].bool().unsqueeze(-2)
             if has_spike_i.sum() > 0:
@@ -123,19 +125,52 @@ class FullColumn(torch.nn.Module):
                 capture = has_spike_i.logical_and(has_spike_o).sum(0) * mu_capture
                 search = has_spike_i.logical_and(has_spike_o.logical_not()).sum(0) * mu_search
                 history += capture + search
-        
+        # compute backoff
         for t in range(time_o):
             has_spike_o = output_spikes[t].bool().unsqueeze(-1)
             if has_spike_o.sum() > 0:
                 t_max = min(t + 1, time_i)
                 t_min = max(t - self.fodep, 0)
-                if t_max > 256 or t_min > 256:
-                    import code
-                    code.interact(local=locals())
                 has_spike_i = (input_spike_acc[t_max] - input_spike_acc[t_min] > 0).unsqueeze(-2)
                 backoff = has_spike_i.logical_not().logical_and(has_spike_o).sum(0) * mu_backoff
                 history += backoff
-        
+        # update
         update = history * (self.weight * (1 - self.weight) * 3 + 0.25)
         self.weight = (self.weight + update).clip(0, 1)
+        # adjust bias
+        weight_sum = self.weight.sum(1)
+        if weight_sum.all():
+            self.bias = self.theta * (keep_bias +  (1 - keep_bias) * self.output_channel * self.neurons * weight_sum / weight_sum.sum())
+        else:
+            self.bias[:] = self.theta
+
+
+class RecurrentColumn(torch.nn.Module):
+    def __init__(
+        self, 
+        synapses, neurons, input_channel=1, output_channel=1, 
+        step=16, leak=32, 
+        fodep=None, w_init=0., theta=None, dense=None
+    ):
+        super().__init__()
+        self.synapses = synapses
+        self.neurons = neurons
+        self.input_channel = input_channel
+        self.output_channel = output_channel
+
+        assert theta or dense, 'either theta or dense should be specified'
+        self.theta = theta = theta or dense * (synapses * input_channel)
+        self.dense = dense = dense or theta / (synapses * input_channel)
+        assert dense < 2 * input_channel * synapses, 'invalid theta or density, try setting a smaller value'
+        # default response function: StepFireLeak with step=1, leak=2
+        self.response_function = StepFireLeak(step, leak)
+        self.fodep = fodep = fodep or self.response_function.fodep
+        assert fodep >= self.response_function.fodep, f'forced depression should be at least {self.response_function.fodep}'
+        # initialize weight to zeros first
+        self.weight = torch.zeros(self.output_channel * self.neurons, (self.input_channel + self.output_channel) * self.synapses) + w_init
+        self.bias = torch.zeros(self.output_channel * self.neurons) + self.theta
+        print(f'Building recurrent TNN layer with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}')
     
+    def forward(self, input_spikes, labels=None):
+        
+        return
