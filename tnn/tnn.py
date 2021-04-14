@@ -28,8 +28,8 @@ class FullColumn(torch.nn.Module):
     def __init__(
         self, 
         synapses, neurons, input_channel=1, output_channel=1, 
-        step=16, leak=32, fodep=None, 
-        theta=None, dense=None
+        step=16, leak=32, 
+        fodep=None, w_init=0., theta=None, dense=None
     ):
         super(FullColumn, self).__init__()
 
@@ -38,17 +38,18 @@ class FullColumn(torch.nn.Module):
         self.input_channel = input_channel
         self.output_channel = output_channel
 
-        assert theta or dense, "either theta or dense should be specified"
+        assert theta or dense, 'either theta or dense should be specified'
         self.theta = theta = theta or dense * (synapses * input_channel)
         self.dense = dense = dense or theta / (synapses * input_channel)
-        assert dense < 2 * input_channel * synapses, "invalid theta or density, try setting a smaller value"
+        assert dense < 2 * input_channel * synapses, 'invalid theta or density, try setting a smaller value'
         # default response function: StepFireLeak with step=1, leak=2
         self.response_function = StepFireLeak(step, leak)
-        self.fodep = fodep or self.response_function.fodep
+        self.fodep = fodep = fodep or self.response_function.fodep
+        assert fodep >= self.response_function.fodep, f'forced depression should be at least {self.response_function.fodep}'
         # initialize weight to zeros first
-        self.weight = torch.zeros(self.output_channel * self.neurons, self.input_channel * self.synapses)
+        self.weight = torch.zeros(self.output_channel * self.neurons, self.input_channel * self.synapses) + w_init
 
-        print(f'Building full connected TNN layer with theta={theta:.4f}, dense={dense:.4f}')
+        print(f'Building full connected TNN layer with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}')
     
     def to(self, device):
         super(FullColumn, self).to(device)
@@ -109,17 +110,31 @@ class FullColumn(torch.nn.Module):
         output_spikes = output_spikes.reshape(batch, channel_o * neurons, time_o).permute(2, 0, 1)
         output_spike_acc = torch.cumsum(output_spikes, dim=0)
         output_spike_acc = torch.cat((torch.zeros_like(output_spike_acc[0]).unsqueeze(0), output_spike_acc), 0)
-
+        input_spike_acc = torch.cumsum(input_spikes, dim=0)
+        input_spike_acc = torch.cat((torch.zeros_like(input_spike_acc[0]).unsqueeze(0), input_spike_acc), 0)
         history = torch.zeros_like(self.weight)
 
         for t in range(time_i):
-            t_max = min(t + self.fodep + 1, time_o)
-            has_spike_o = (output_spike_acc[t_max] - output_spike_acc[t] > 0).unsqueeze(-1)
             has_spike_i = input_spikes[t].bool().unsqueeze(-2)
-            capture = has_spike_i.logical_and(has_spike_o).sum(axis=0) * mu_capture
-            backoff = has_spike_i.logical_not().logical_and(has_spike_o).sum(axis=0) * mu_backoff
-            search = has_spike_i.logical_and(has_spike_o.logical_not()).sum(axis=0) * mu_search
-            history += capture + backoff + search
+            if has_spike_i.sum() > 0:
+                t_max = min(t + self.fodep + 1, time_o)
+                has_spike_o = (output_spike_acc[t_max] - output_spike_acc[t] > 0).unsqueeze(-1)
+                has_spike_i = input_spikes[t].bool().unsqueeze(-2)
+                capture = has_spike_i.logical_and(has_spike_o).sum(0) * mu_capture
+                search = has_spike_i.logical_and(has_spike_o.logical_not()).sum(0) * mu_search
+                history += capture + search
+        
+        for t in range(time_o):
+            has_spike_o = output_spikes[t].bool().unsqueeze(-1)
+            if has_spike_o.sum() > 0:
+                t_max = min(t + 1, time_i)
+                t_min = max(t - self.fodep, 0)
+                if t_max > 256 or t_min > 256:
+                    import code
+                    code.interact(local=locals())
+                has_spike_i = (input_spike_acc[t_max] - input_spike_acc[t_min] > 0).unsqueeze(-2)
+                backoff = has_spike_i.logical_not().logical_and(has_spike_o).sum(0) * mu_backoff
+                history += backoff
         
         update = history * (self.weight * (1 - self.weight) * 3 + 0.25)
         self.weight = (self.weight + update).clip(0, 1)
