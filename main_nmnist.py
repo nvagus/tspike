@@ -1,4 +1,3 @@
-from tnn.tnn import StepFireLeak
 import click
 import torch
 from torch.utils.data.dataloader import DataLoader

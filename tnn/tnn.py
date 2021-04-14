@@ -46,14 +46,17 @@ class FullColumn(torch.nn.Module):
         self.response_function = StepFireLeak(step, leak)
         self.fodep = fodep = fodep or self.response_function.fodep
         assert fodep >= self.response_function.fodep, f'forced depression should be at least {self.response_function.fodep}'
-        # initialize weight to zeros first
-        self.weight = torch.zeros(self.output_channel * self.neurons, self.input_channel * self.synapses) + w_init
+        # initialize weight to w_init
+        self.weight = torch.nn.parameter.Parameter(
+            torch.zeros(self.output_channel * self.neurons, self.input_channel * self.synapses) + w_init,
+            requires_grad=False
+        )
         print(f'Building full connected TNN layer with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}')
     
-    def to(self, device):
-        super(FullColumn, self).to(device)
-        self.weight = self.weight.to(device)
-        return self
+    # def to(self, device):
+    #     super(FullColumn, self).to(device)
+    #     self.weight = self.weight.to(device)
+    #     return self
 
     def forward(self, input_spikes, labels=None):
         potentials = self.get_potentials(input_spikes, labels)
@@ -133,7 +136,7 @@ class FullColumn(torch.nn.Module):
                 history += backoff
         # update
         update = history * (self.weight * (1 - self.weight) * 3 + 0.25)
-        self.weight = (self.weight + update).clip(0, 1)
+        self.weight.add_(update).clip_(0, 1)
 
 
 class RecurrentColumn(torch.nn.Module):
