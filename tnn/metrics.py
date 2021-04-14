@@ -50,4 +50,4 @@ class AutoMatchingMatrix:
         return accuracy, precision, recall
     
     def describe_print_clear(self):
-        print('Acuracy: {:.4f}; Precision: {:.4f}; Recall: {:.4f}'.format(*self.describe()))
+        print('Accuracy: {:.4f}; Precision: {:.4f}; Recall: {:.4f}'.format(*self.describe()))

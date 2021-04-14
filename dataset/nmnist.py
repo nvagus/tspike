@@ -22,10 +22,10 @@ def load_as_indices(filepath, sample_rate):
     return np.vstack([t.astype(np.uint8), p, x, y]), x.max(), y.max(), t.max()
 
 
-def indices_to_matrix(mat, x_max, y_max, t_max):
-    result = torch.zeros(2, x_max, y_max, t_max, dtype=torch.int32)
-    for t, p, x, y in mat.T:
-        result[p, x, y, t] = 1
+def indices_to_matrix(mat, x_max, y_max, t_max, device):
+    result = torch.zeros(2, x_max, y_max, t_max).to(device)
+    mat = torch.Tensor(mat).type(torch.int64).to(device)
+    result[mat[1], mat[2], mat[3], mat[0]] = 1
     return result
 
 
@@ -34,22 +34,23 @@ def label_to_idx(label):
 
 
 class NMnistSampled(Dataset):
-    def __init__(self, root_dir, x_max, y_max, t_max):
+    def __init__(self, root_dir, x_max, y_max, t_max, device='cpu'):
         self.dir = pathlib.Path(root_dir)
         self.files = os.listdir(self.dir)
         self.x_max = x_max
         self.y_max = y_max
         self.t_max = t_max
+        self.device = device
 
     def __len__(self):
         return len(self.files)
 
     def __getitem__(self, idx):
         data = np.load(self.dir / self.files[idx])
-        return {
-            'data': indices_to_matrix(data['indices'], self.x_max, self.y_max, self.t_max),
-            'label': label_to_idx(data['label'])
-        }
+        return (
+            indices_to_matrix(data['indices'], self.x_max, self.y_max, self.t_max, self.device), 
+            label_to_idx(data['label'])
+        )
 
 
 @click.command()

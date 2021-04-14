@@ -1,11 +1,20 @@
-from tnn.configs import MAX_WEIGHT
 import click
 import torch
 from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm
 
 from dataset import NMnistSampled
-from tnn import AutoMatchingMatrix, FullColumn, set_device
+from tnn import AutoMatchingMatrix, FullColumn
+
+
+class Interrupter:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        if exc_type is KeyboardInterrupt:
+            return True
+        return exc_type is None
 
 
 @click.command()
@@ -29,32 +38,32 @@ def main(
     else:  
         dev = 'cpu'
     device = torch.device(dev)
-    set_device(device)
     
-    
-    train_data_loader = DataLoader(NMnistSampled(train_path, x_max, y_max, t_max), shuffle=True, batch_size=batch)
-    test_data_loader = DataLoader(NMnistSampled(test_path, x_max, y_max, t_max), batch_size=batch)
+    train_data_loader = DataLoader(NMnistSampled(train_path, x_max, y_max, t_max, device=device), shuffle=True, batch_size=batch)
+    test_data_loader = DataLoader(NMnistSampled(test_path, x_max, y_max, t_max, device=device), batch_size=batch)
 
-    model = FullColumn(x_max * y_max, 10, input_channel=2, output_channel=1, dense=20, fodep=t_max)
+    model = FullColumn(x_max * y_max, 10, input_channel=2, output_channel=1, dense=0.4, fodep=t_max).to(device)
     
 
     for epoch in range(epochs):
         print(f"epoch: {epoch}")
         train_data_iterator = tqdm(train_data_loader)
-        train_data_iterator.set_description(f'weight: {model.weight.sum()}')
-        for i, sample in enumerate(train_data_iterator):
-            input_spikes = sample['data'].reshape(batch, 2, x_max * y_max, t_max).to(device)
-            output_spikes = model.forward(input_spikes, sample['label'])
-            model.stdp(input_spikes, output_spikes)
-            train_data_iterator.set_description(f'weight: {model.weight.sum()}')
+        train_data_iterator.set_description(f'weight: {model.weight.sum():.4f}')
+        with Interrupter():
+            for data, label in train_data_iterator:
+                input_spikes = data.reshape(batch, 2, x_max * y_max, t_max)
+                output_spikes = model.forward(input_spikes, label.to(device))
+                model.stdp(input_spikes, output_spikes)
+                train_data_iterator.set_description(f'weight: {model.weight.sum():.4f}')
         
         auto_matcher = AutoMatchingMatrix(10, 10)
-        for sample in tqdm(test_data_loader):
-            input_spikes = sample['data'].reshape(batch, 2, x_max * y_max, t_max).to(device)
-            output_spikes = model.forward(input_spikes)
-            for output_spike, label in zip(output_spikes, sample['label']):
-                prediction = output_spike.sum(axis=(-1, -3)).argmax()
-                auto_matcher.add_sample(label, prediction)
+        with Interrupter():
+            for data, label in tqdm(test_data_loader):
+                input_spikes = data.reshape(batch, 2, x_max * y_max, t_max)
+                output_spikes = model.forward(input_spikes)
+                for output_spike, label in zip(output_spikes.cpu().numpy(), label.numpy()):
+                    prediction = output_spike.sum(axis=(-1, -3)).argmax()
+                    auto_matcher.add_sample(label, prediction)
         
         print(auto_matcher.mat)
         auto_matcher.describe_print_clear()
