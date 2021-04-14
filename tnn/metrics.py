@@ -18,7 +18,7 @@ class AutoMatchingMatrix:
     def describe(self):
         G = {
             f'label-{label}': {
-                f'output-{output}': self.mat[label, output]
+                f'output-{output}': self.mat[label, output] + 1
                 for output in range(self.n_outputs)
             }
             for label in range(self.n_labels)
