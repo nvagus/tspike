@@ -28,7 +28,6 @@ class Interrupter:
 @click.option('-f', '--forced-dep', default=0)
 @click.option('-d', '--dense', default=0.15)
 @click.option('-w', '--w-init', default=0.5)
-@click.option('-k', '--keep-bias', default=1.0)
 @click.option('-s', '--step', default=1)
 @click.option('-l', '--leak', default=2)
 @click.option('-S/-U', '--supervised/--unsupervised', default=True)
@@ -39,7 +38,7 @@ def main(
     gpu, batch, epochs, supervised,
     x_max, y_max, t_max, 
     step, leak,
-    forced_dep, dense, w_init, keep_bias,
+    forced_dep, dense, w_init,
     train_path, test_path, model_path,
     **kwargs
 ):
@@ -75,7 +74,7 @@ def main(
                     output_spikes = model.forward(input_spikes, label.to(device))
                 else:
                     output_spikes = model.forward(input_spikes)
-                model.stdp(input_spikes, output_spikes, keep_bias=keep_bias)
+                model.stdp(input_spikes, output_spikes)
                 accurate = (output_spikes.sum((-3, -2, -1)) > 0).logical_and(output_spikes.sum((-3, -1)).argmax(-1) == label.to(device)).sum()
                 train_data_iterator.set_description(f'{descriptor()}; {output_spikes.sum()}, {accurate}')
         
