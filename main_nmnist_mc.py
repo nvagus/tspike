@@ -17,6 +17,10 @@ class Interrupter:
         return exc_type is None
 
 
+def eval_callback(ctx, param, value):
+    return eval(value)
+
+
 @click.command()
 @click.option('-g', '--gpu', default=0)
 @click.option('-e', '--epochs', default=1)
@@ -24,13 +28,13 @@ class Interrupter:
 @click.option('-x', '--x-max', default=34)
 @click.option('-y', '--y-max', default=34)
 @click.option('-t', '--t-max', default=256)
-@click.option('-f', '--forced-dep', multiple=True, default=[0, 0, 256])
-@click.option('-d', '--dense', multiple=True, default=[0.05, 0.10, 0.15])
-@click.option('-w', '--w-init', multiple=True, default=[0.5, 0.5, 0.5])
-@click.option('-n', '--neurons', multiple=True, default=[32, 32, 10])
-@click.option('-c', '--channels', multiple=True, default=[32, 32, 1])
-@click.option('-s', '--step', multiple=True, default=[1, 2, 4])
-@click.option('-l', '--leak', multiple=True, default=[2, 4, 8])
+@click.option('-f', '--forced-dep', default='[0, 0, 256]', callback=eval_callback)
+@click.option('-d', '--dense', default='[0.05, 0.10, 0.15]', callback=eval_callback)
+@click.option('-w', '--w-init', default='[0.5, 0.5, 0.5]', callback=eval_callback)
+@click.option('-n', '--neurons', default='[32, 32, 10]', callback=eval_callback)
+@click.option('-c', '--channels', default='[32, 32, 1]', callback=eval_callback)
+@click.option('-s', '--step', default='[1, 2, 4]', callback=eval_callback)
+@click.option('-l', '--leak', default='[2, 4, 8]', callback=eval_callback)
 @click.option('-S/-U', '--supervised/--unsupervised', default=True)
 @click.option('--train-path', default='data/n-mnist/TrainSP')
 @click.option('--test-path', default='data/n-mnist/TestSP')
