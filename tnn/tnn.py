@@ -128,6 +128,8 @@ class FullColumn(torch.nn.Module):
             if has_spike_o.sum() > 0:
                 t_max = min(t + 1, time_i)
                 t_min = max(t - self.fodep, 0)
+                if t_min > time_i:
+                    break
                 has_spike_i = (input_spike_acc[t_max] - input_spike_acc[t_min] > 0).unsqueeze(-2)
                 backoff = has_spike_i.logical_not().logical_and(has_spike_o).sum(0) * mu_backoff
                 history += backoff
