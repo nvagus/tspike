@@ -28,13 +28,14 @@ def eval_callback(ctx, param, value):
 @click.option('-x', '--x-max', default=34)
 @click.option('-y', '--y-max', default=34)
 @click.option('-t', '--t-max', default=256)
-@click.option('-f', '--forced-dep', default='[0,0,256]', callback=eval_callback)
-@click.option('-d', '--dense', default='[0.05,0.10,0.15]', callback=eval_callback)
-@click.option('-w', '--w-init', default='[0.5,0.5,0.5]', callback=eval_callback)
-@click.option('-n', '--neurons', default='[32,32,10]', callback=eval_callback)
-@click.option('-c', '--channels', default='[32,32,1]', callback=eval_callback)
-@click.option('-s', '--step', default='[1,2,4]', callback=eval_callback)
-@click.option('-l', '--leak', default='[2,4,8]', callback=eval_callback)
+@click.option('-f', '--forced-dep', default='[0,256]', callback=eval_callback)
+@click.option('-d', '--dense', default='[0.05,0.15]', callback=eval_callback)
+@click.option('-a', '--theta', default='[30,50]', callback=eval_callback)
+@click.option('-w', '--w-init', default='[0.5,0.5]', callback=eval_callback)
+@click.option('-n', '--neurons', default='[32,10]', callback=eval_callback)
+@click.option('-c', '--channels', default='[32,1]', callback=eval_callback)
+@click.option('-s', '--step', default='[16,32]', callback=eval_callback)
+@click.option('-l', '--leak', default='[32,64]', callback=eval_callback)
 @click.option('-S/-U', '--supervised/--unsupervised', default=True)
 @click.option('--train-path', default='data/n-mnist/TrainSP')
 @click.option('--test-path', default='data/n-mnist/TestSP')
@@ -44,7 +45,7 @@ def main(
     x_max, y_max, t_max, 
     neurons, channels,
     step, leak,
-    forced_dep, dense, w_init,
+    theta, dense, forced_dep, w_init,
     train_path, test_path, model_path,
     **kwargs
 ):
@@ -63,7 +64,7 @@ def main(
     model = StackFullColumn(
         [x_max * y_max, *neurons], [2, *channels], kernel=2,
         step=step, leak=leak,
-        dense=dense, fodep=forced_dep, w_init=w_init
+        theta=theta, dense=dense, fodep=forced_dep, w_init=w_init
     ).to(device)
     
     def descriptor():
