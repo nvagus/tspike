@@ -1,4 +1,6 @@
 import torch
+from torch.distributions.exponential import Exponential
+import numpy as np
 
 
 class StepFireLeak:
@@ -6,6 +8,8 @@ class StepFireLeak:
         self.step = step
         self.leak = leak
         self.kernel_size = step + leak
+        self.padding = int(np.ceil((self.kernel_size + self.step) / 2))
+        self.fodep = self.kernel_size
 
     def get_weight_kernel(self, weight):
         kernel_zero = torch.zeros(*weight.shape, self.kernel_size, device=weight.device)
@@ -14,14 +18,6 @@ class StepFireLeak:
         t_leak = -(t_axis - weight.unsqueeze(-1) * self.step) / self.leak + weight.unsqueeze(-1)
         kernel = kernel_zero.max(t_spike.min(t_leak)).flip(-1)
         return kernel
-
-    @property
-    def padding(self):
-        return self.kernel_size + self.step
-
-    @property
-    def fodep(self):
-        return self.kernel_size
 
 
 class FullColumn(torch.nn.Module):
@@ -48,7 +44,7 @@ class FullColumn(torch.nn.Module):
         assert fodep >= self.response_function.fodep, f'forced depression should be at least {self.response_function.fodep}'
         # initialize weight to w_init
         self.weight = torch.nn.parameter.Parameter(
-            torch.zeros(self.output_channel * self.neurons, self.input_channel * self.synapses) + w_init,
+            Exponential(w_init).sample((self.output_channel * self.neurons, self.input_channel * self.synapses)).clip(0, 1),
             requires_grad=False
         )
         print(f'Building full connected TNN layer with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}')
@@ -82,21 +78,24 @@ class FullColumn(torch.nn.Module):
     def winner_takes_all(self, potentials):
         # move time axis to 0 for better performance
         batch, channel, neurons, time = potentials.shape
-        potentials = potentials.permute(3, 0, 1, 2)
+        potentials = potentials.permute(3, 1, 0, 2)
         # time to step out of depression, with initial 0 and constrains >= 0
-        depression = torch.zeros(batch, channel, dtype=torch.int32, device=potentials.device)
-        min_depression = torch.zeros(batch, channel, dtype=torch.int32, device=potentials.device)
+        depression = torch.zeros(channel, batch, neurons, dtype=torch.int32, device=potentials.device)
         # return winners of the same shape as potentials
-        winners = torch.zeros(time, batch, channel, neurons, dtype=torch.int32, device=potentials.device)
+        winners = torch.zeros(time, channel, batch, neurons, dtype=torch.int32, device=potentials.device)
         # iterate time axis: get the winner for each batch, channel of neurons, update winners and depression
         for t in range(time):
-            winner_t = potentials[t].argmax(axis=-1).unsqueeze(-1)
-            spike_t = (potentials[t].gather(-1, winner_t)  > self.theta).squeeze(-1)
-            cond_t = spike_t.logical_and(depression == min_depression).int()
-            winners[t].scatter_(-1, winner_t, cond_t.unsqueeze(-1))
-            depression = min_depression.max(depression + winners[t].sum(axis=-1) * (self.fodep + 1) - 1)
+            for c in range(channel):
+                potential_tc = potentials[t, c] * (depression[c] == 0).int()
+                winner_tc = potential_tc.argmax(-1).unsqueeze(-1)
+                spike_tc = (potential_tc.gather(-1, winner_tc) > self.theta).int()
+                winners[t,c].scatter_(-1, winner_tc, spike_tc)
+                depression[c].scatter_add_(-1, winner_tc, -spike_tc * self.fodep)
+                depression[c] += spike_tc * self.fodep
+                depression += winners[t,c].unsqueeze(0) * self.fodep
+            depression = (depression - 1).clip(0, self.fodep - 1)
         # move time axis to -1 for the convenience of convolutional operations
-        return winners.permute(1, 2, 3, 0).float()
+        return winners.permute(2, 1, 3, 0).float()
 
     def stdp(
         self, 
