@@ -53,14 +53,11 @@ class FullColumn(torch.nn.Module):
         )
         print(f'Building full connected TNN layer with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}')
     
-    # def to(self, device):
-    #     super(FullColumn, self).to(device)
-    #     self.weight = self.weight.to(device)
-    #     return self
-
-    def forward(self, input_spikes, labels=None):
-        potentials = self.get_potentials(input_spikes, labels)
+    def forward(self, input_spikes, labels=None, bias=0.5):
+        potentials = self.get_potentials(input_spikes, labels, bias)
         output_spikes = self.winner_takes_all(potentials)
+        if self.training:
+            self.stdp(input_spikes, output_spikes)
         return output_spikes
 
     def get_potentials(self, input_spikes, labels=None, bias=0.5):
@@ -99,7 +96,7 @@ class FullColumn(torch.nn.Module):
             winners[t].scatter_(-1, winner_t, cond_t.unsqueeze(-1))
             depression = min_depression.max(depression + winners[t].sum(axis=-1) * (self.fodep + 1) - 1)
         # move time axis to -1 for the convenience of convolutional operations
-        return winners.permute(1, 2, 3, 0)
+        return winners.permute(1, 2, 3, 0).float()
 
     def stdp(
         self, 

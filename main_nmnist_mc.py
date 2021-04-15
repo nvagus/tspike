@@ -4,7 +4,7 @@ from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm
 
 from dataset import NMnistSampled
-from tnn import AutoMatchingMatrix, FullColumn
+from tnn import AutoMatchingMatrix, StackFullColumn
 
 
 class Interrupter:
@@ -24,18 +24,21 @@ class Interrupter:
 @click.option('-x', '--x-max', default=34)
 @click.option('-y', '--y-max', default=34)
 @click.option('-t', '--t-max', default=256)
-@click.option('-f', '--forced-dep', default=0)
-@click.option('-d', '--dense', default=0.15)
-@click.option('-w', '--w-init', default=0.5)
-@click.option('-s', '--step', default=1)
-@click.option('-l', '--leak', default=2)
+@click.option('-f', '--forced-dep', multiple=True, default=[0, 0, 256])
+@click.option('-d', '--dense', multiple=True, default=[0.05, 0.10, 0.15])
+@click.option('-w', '--w-init', multiple=True, default=[0.5, 0.5, 0.5])
+@click.option('-n', '--neurons', multiple=True, default=[32, 32, 10])
+@click.option('-c', '--channels', multiple=True, default=[32, 32, 1])
+@click.option('-s', '--step', multiple=True, default=[1, 2, 4])
+@click.option('-l', '--leak', multiple=True, default=[2, 4, 8])
 @click.option('-S/-U', '--supervised/--unsupervised', default=True)
 @click.option('--train-path', default='data/n-mnist/TrainSP')
 @click.option('--test-path', default='data/n-mnist/TestSP')
-@click.option('--model-path', default='model/n-mnist-1')
+@click.option('--model-path', default='model/n-mnist-2')
 def main(
     gpu, batch, epochs, supervised,
     x_max, y_max, t_max, 
+    neurons, channels,
     step, leak,
     forced_dep, dense, w_init,
     train_path, test_path, model_path,
@@ -53,14 +56,14 @@ def main(
     train_data_loader = DataLoader(NMnistSampled(train_path, x_max, y_max, t_max, device=device), shuffle=True, batch_size=batch)
     test_data_loader = DataLoader(NMnistSampled(test_path, x_max, y_max, t_max, device=device), batch_size=batch)
 
-    model = FullColumn(
-        x_max * y_max, 10, input_channel=2, output_channel=1, 
+    model = StackFullColumn(
+        [x_max * y_max, *neurons], [2, *channels], kernel=2,
         step=step, leak=leak,
         dense=dense, fodep=forced_dep, w_init=w_init
     ).to(device)
     
     def descriptor():
-        return ','.join('{:.0f}'.format(x) for x in model.weight.sum(axis=1))
+        return ','.join('{:.0f}'.format(c.weight.sum()) for c in model.columns)
 
     for epoch in range(epochs):
         model.train(mode=True)
@@ -94,7 +97,6 @@ def main(
         print(auto_matcher.mat)
         print(f'Coverage: {auto_matcher.mat.sum() / len(test_data_loader.dataset)}')
         auto_matcher.describe_print_clear()
-        print(f'Weight sum: {model.weight.sum()}')
         torch.save(model.state_dict(), model_path)
 
     return 0
