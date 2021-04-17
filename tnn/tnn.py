@@ -44,7 +44,7 @@ class FullColumn(torch.nn.Module):
         assert fodep >= self.response_function.fodep, f'forced depression should be at least {self.response_function.fodep}'
         # initialize weight to w_init
         self.weight = torch.nn.parameter.Parameter(
-            Exponential(w_init).sample((self.output_channel * self.neurons, self.input_channel * self.synapses)).clip(0, 1),
+            Exponential(1 / w_init).sample((self.output_channel * self.neurons, self.input_channel * self.synapses)).clip(0, 1),
             requires_grad=False
         )
         print(f'Building full connected TNN layer with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}')
@@ -163,7 +163,7 @@ class ConvColumn(torch.nn.Module):
         assert fodep >= self.response_function.fodep, f'forced depression should be at least {self.response_function.fodep}'
         # initialize weight to w_init
         self.weight = torch.nn.parameter.Parameter(
-            Exponential(w_init).sample((self.output_channel, self.input_channel, self.kernel, self.kernel)).clip(0, 1),
+            Exponential(1 / w_init).sample((self.output_channel, self.input_channel, self.kernel, self.kernel)).clip(0, 1),
             requires_grad=True
         )
         print(f'Building convolutional TNN layer with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}')

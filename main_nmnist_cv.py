@@ -41,6 +41,9 @@ class LinearModel(torch.nn.Module):
 @click.option('-s', '--step', default=16)
 @click.option('-l', '--leak', default=32)
 @click.option('-c', '--channel', default=8)
+@click.option('--capture', default=0.2000)
+@click.option('--backoff', default=0.2000)
+@click.option('--search', default=0.0001)
 @click.option('-S/-U', '--supervised/--unsupervised', default=True)
 @click.option('--train-path', default='data/n-mnist/TrainSP')
 @click.option('--test-path', default='data/n-mnist/TestSP')
@@ -50,6 +53,7 @@ def main(
     x_max, y_max, t_max, 
     step, leak,
     forced_dep, dense, w_init, channel,
+    capture, backoff, search,
     train_path, test_path, model_path,
     **kwargs
 ):
@@ -83,7 +87,7 @@ def main(
         with Interrupter():
             for data, label in train_data_iterator:
                 input_spikes = data
-                output_spikes = model.forward(input_spikes)
+                output_spikes = model.forward(input_spikes, mu_capture=capture, mu_backoff=backoff, mu_search=search)
                 train_data_iterator.set_description(f'{descriptor()}; {input_spikes.sum().int()}, {output_spikes.sum().int()}')
         
         model.train(mode=False)
