@@ -217,6 +217,7 @@ class ConvColumn(torch.nn.Module):
         ) / (
             batch * neuron_x * neuron_y
         )
+        update = update - update.mean((1, 2, 3), keepdim=True)
         with torch.no_grad():
             self.weight.add_(update).clip_(0, 1)
 
