@@ -44,7 +44,7 @@ class FullColumn(torch.nn.Module):
         assert fodep >= self.response_function.fodep, f'forced depression should be at least {self.response_function.fodep}'
         # initialize weight to w_init
         self.weight = torch.nn.parameter.Parameter(
-            Exponential(w_init).sample((self.output_channel * self.neurons, self.input_channel * self.synapses)).clip(0, 1),
+            Exponential(1 / w_init).sample((self.output_channel * self.neurons, self.input_channel * self.synapses)).clip(0, 1),
             requires_grad=False
         )
         print(f'Building full connected TNN layer with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}')
@@ -52,6 +52,8 @@ class FullColumn(torch.nn.Module):
     def forward(self, input_spikes, labels=None, bias=0.5):
         potentials = self.get_potentials(input_spikes, labels, bias)
         output_spikes = self.winner_takes_all(potentials)
+        import code
+        code.interact(local=locals())
         if self.training:
             self.stdp(input_spikes, output_spikes)
         return output_spikes
@@ -137,14 +139,96 @@ class FullColumn(torch.nn.Module):
         self.weight.add_(update).clip_(0, 1)
 
 
-class RecurrentColumn(torch.nn.Module):
+class ConvColumn(torch.nn.Module):
+    def __init__(
+        self, 
+        input_channel=1, output_channel=1, 
+        kernel=3, stride=2, 
+        step=16, leak=32, 
+        fodep=None, w_init=0., theta=None, dense=None
+    ):
+        super(ConvColumn, self).__init__()
+        self.input_channel = input_channel
+        self.output_channel = output_channel
+        self.kernel = kernel
+        self.stride = stride
+
+        assert theta or dense, 'either theta or dense should be specified'
+        self.theta = theta = theta or dense * (kernel * kernel * input_channel)
+        self.dense = dense = dense or theta / (kernel * kernel * input_channel)
+        assert dense < 2 * input_channel * kernel * kernel, 'invalid theta or density, try setting a smaller value'
+        # default response function: StepFireLeak with step=1, leak=2
+        self.response_function = StepFireLeak(step, leak)
+        self.fodep = fodep = fodep or self.response_function.fodep
+        assert fodep >= self.response_function.fodep, f'forced depression should be at least {self.response_function.fodep}'
+        # initialize weight to w_init
+        self.weight = torch.nn.parameter.Parameter(
+            Exponential(1 / w_init).sample((self.output_channel, self.input_channel, self.kernel, self.kernel)).clip(0, 1),
+            requires_grad=True
+        )
+        print(f'Building convolutional TNN layer with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}')
+    
+    def forward(self, input_spikes, mu_capture=0.2000, mu_backoff=-0.2000, mu_search=0.0001):
+        potentials = self.get_potentials(input_spikes)
+        output_spikes = self.winner_takes_all(potentials)
+        if self.training:
+            self.stdp(potentials, output_spikes, mu_capture, mu_backoff, mu_search)
+        return output_spikes
+    
+    def get_potentials(self, input_spikes):
+        # move time axis beween channel and synpases
+        input_spikes = input_spikes.permute(0, 1, 4, 2, 3)
+        w_kernel = self.response_function.get_weight_kernel(self.weight).permute(0, 1, 4, 2, 3)
+        potentials = torch.nn.functional.conv3d(
+            input_spikes, w_kernel, 
+            stride=(1, self.stride, self.stride),
+            padding=(self.response_function.padding, 0, 0)
+        )
+        return potentials.permute(0, 1, 3, 4, 2)
+    
+    def winner_takes_all(self, potentials):
+        batch, channel, neuron_x, neuron_y, time = potentials.shape
+        potentials = potentials.reshape(batch, channel, neuron_x * neuron_y, time).permute(3, 1, 0, 2)
+        # time to step out of depression, with initial 0 and constrains >= 0
+        depression = torch.zeros(channel, batch, neuron_x * neuron_y, dtype=torch.int32, device=potentials.device)
+        # return winners of the same shape as potentials
+        winners = torch.zeros(time, channel, batch, neuron_x * neuron_y, dtype=torch.int32, device=potentials.device)
+        for t in range(time):
+            potential_t = potentials[t] * (depression == 0).int()
+            winner_t = potential_t.argmax(-1).unsqueeze(-1)
+            spike_t = (potential_t.gather(-1, winner_t) > self.theta).int()
+            winners[t].scatter_(-1, winner_t, spike_t)
+            depression += winners[t].sum(0).unsqueeze(0) * self.fodep
+            depression = (depression - 1).clip(0, self.fodep - 1)
+            # TODO k limitation per channel
+        return winners.permute(2, 1, 0, 3).reshape(batch, channel, neuron_x, neuron_y, time).float()
+
+    def stdp(self, potentials, output_spikes, mu_capture, mu_backoff, mu_search):
+        batch, channel, neuron_x, neuron_y, time = output_spikes.shape
+        capture_grad, = torch.autograd.grad((potentials * output_spikes).sum(), self.weight, retain_graph=True)
+        search_grad, = torch.autograd.grad(potentials.sum(), self.weight)
+        backoff_grad = output_spikes.sum((0, 2, 3, 4)).reshape(-1, 1, 1, 1) - capture_grad
+        update = (
+            capture_grad * mu_capture + 
+            backoff_grad * mu_backoff + 
+            search_grad * mu_search
+        ) * (
+            (self.weight * (1 - self.weight) * 3 + 0.25)
+        ) / (
+            batch * neuron_x * neuron_y
+        )
+        with torch.no_grad():
+            self.weight.add_(update).clip_(0, 1)
+
+
+class RecurColumn(torch.nn.Module):
     def __init__(
         self, 
         synapses, neurons, input_channel=1, output_channel=1, 
         step=16, leak=32, 
         fodep=None, w_init=0., theta=None, dense=None
     ):
-        super().__init__()
+        super(RecurColumn, self).__init__()
         self.synapses = synapses
         self.neurons = neurons
         self.input_channel = input_channel
