@@ -91,6 +91,8 @@ def main(
                 train_data_iterator.set_description(f'{descriptor()}; {input_spikes.sum().int()}, {output_spikes.sum().int()}')
         
         model.train(mode=False)
+        torch.save(model.state_dict(), model_path)
+
         train_data_iterator = tqdm(train_data_loader)
         batch, channel, neuron_x, neuron_y, time = output_spikes.shape
         tester = LinearModel(channel * neuron_x * neuron_y, 10).to(device)
@@ -120,7 +122,6 @@ def main(
         
         print(auto_matcher.mat)
         auto_matcher.describe_print_clear()
-        torch.save(model.state_dict, model_path)
 
     return 0
 
