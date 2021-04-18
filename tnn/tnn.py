@@ -168,7 +168,7 @@ class ConvColumn(torch.nn.Module):
         )
         print(f'Building convolutional TNN layer with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}')
     
-    def forward(self, input_spikes, mu_capture=0.2000, mu_backoff=-0.2000, mu_search=0.0001):
+    def forward(self, input_spikes, mu_capture=0.2000, mu_backoff=-0.4000, mu_search=0.0001):
         potentials = self.get_potentials(input_spikes)
         output_spikes = self.winner_takes_all(potentials)
         if self.training:
@@ -217,7 +217,7 @@ class ConvColumn(torch.nn.Module):
         ) / (
             batch * neuron_x * neuron_y
         )
-        update = update - update.mean((1, 2, 3), keepdim=True)
+        
         with torch.no_grad():
             self.weight.add_(update).clip_(0, 1)
 

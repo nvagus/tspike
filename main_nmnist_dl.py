@@ -135,7 +135,7 @@ def main(
         
         print(auto_matcher.mat)
         auto_matcher.describe_print_clear()
-        torch.save(model.state_dict, model_path)
+        torch.save(model.state_dict(), model_path)
 
     return 0
 
