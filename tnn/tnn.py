@@ -1,6 +1,6 @@
+import numpy as np
 import torch
 from torch.distributions.exponential import Exponential
-import numpy as np
 
 
 class StepFireLeak:
@@ -60,9 +60,8 @@ class FullColumn(torch.nn.Module):
         output_spikes = self.winner_takes_all(potentials)
 
         if self.training:
-            # print("input_spikes sum", input_spikes.sum())
-            self.stdp(potentials, input_spikes, output_spikes, mu_capture=mu_capture,
-                      mu_backoff=mu_backoff, mu_search=mu_search)
+            self.stdp(potentials, output_spikes,
+                      mu_capture=mu_capture, mu_backoff=mu_backoff, mu_search=mu_search)
 
         return output_spikes
 
@@ -116,83 +115,18 @@ class FullColumn(torch.nn.Module):
 
         return winners.permute(1, 3, 2, 0).float()
 
-    def stdp_(
-        self,
-        input_spikes, output_spikes,
-        mu_capture=0.0200, mu_backoff=-0.0200, mu_search=0.0001
-    ):
-        batch, channel_i, synapses, time_i = input_spikes.shape
-        batch, channel_o, neurons, time_o = output_spikes.shape
-        input_spikes = input_spikes.reshape(
-            batch, channel_i * synapses, time_i).permute(2, 0, 1)
-        output_spikes = output_spikes.reshape(
-            batch, channel_o * neurons, time_o).permute(2, 0, 1)
-        output_spike_acc = torch.cumsum(output_spikes, dim=0)
-        output_spike_acc = torch.cat(
-            (torch.zeros_like(output_spike_acc[0]).unsqueeze(0), output_spike_acc), 0)
-        input_spike_acc = torch.cumsum(input_spikes, dim=0)
-        input_spike_acc = torch.cat(
-            (torch.zeros_like(input_spike_acc[0]).unsqueeze(0), input_spike_acc), 0)
-        history = torch.zeros_like(self.weight)
-        # compute capture and search
-        for t in range(time_i):
-            has_spike_i = input_spikes[t].bool().unsqueeze(-2)
-            if has_spike_i.sum() > 0:
-                t_max = min(t + self.fodep + 1, time_o)
-                has_spike_o = (
-                    output_spike_acc[t_max] - output_spike_acc[t] > 0).unsqueeze(-1)
-                has_spike_i = input_spikes[t].bool().unsqueeze(-2)
-                capture = has_spike_i.logical_and(
-                    has_spike_o).sum(0) * mu_capture
-                search = has_spike_i.logical_and(
-                    has_spike_o.logical_not()).sum(0) * mu_search
-                history += capture + search
-        # compute backoff
-        for t in range(time_o):
-            has_spike_o = output_spikes[t].bool().unsqueeze(-1)
-            if has_spike_o.sum() > 0:
-                t_max = min(t + 1, time_i)
-                t_min = max(t - self.fodep, 0)
-                if t_min > time_i:
-                    break
-                has_spike_i = (
-                    input_spike_acc[t_max] - input_spike_acc[t_min] > 0).unsqueeze(-2)
-                backoff = has_spike_i.logical_not().logical_and(has_spike_o).sum(0) * mu_backoff
-                history += backoff
-        # update
-        update = history * (self.weight * (1 - self.weight) * 3 + 0.25)
-        self.weight.add_(update).clip_(0, 1)
-
     def stdp(
         self,
-        potentials, input_spikes, output_spikes,
+        potentials, output_spikes,
         mu_capture, mu_backoff, mu_search
     ):
-
         batch, _channel, neurons, _time = output_spikes.shape
 
         capture_grad, = torch.autograd.grad(
             (potentials * output_spikes).sum(), self.weight, retain_graph=True)
-        search_grad, = torch.autograd.grad(
-            potentials.sum(), self.weight, retain_graph=True)
-        search_grad /= (self.weight *
-                        self.response_function.kernel_size).floor() + 1
-
-        # nan -> 0
-        # random number -> every digig
-
-        # search_grad = search_grad.nan_to_num(0)
-        # search_grad[search_grad.isnan()] = 0
-        # search_grad[search_grad.isinf()] = 0
-        # delta = input_spikes.sum() - search_grad.sum()
-        # search_grad += delta / np.prod(search_grad.shape)
-
-        if search_grad.isnan().any():
-            import code
-            code.interact(local=locals())
-
-        backoff_grad = output_spikes.sum(
-            (0, 2, 3)).unsqueeze(-1) - capture_grad
+        search_grad, = torch.autograd.grad(potentials.sum(), self.weight) 
+        search_grad /= (self.weight * self.response_function.kernel_size).floor() + 1
+        backoff_grad = output_spikes.sum((0, 2, 3)).unsqueeze(-1) - capture_grad
 
         update = (
             capture_grad * mu_capture +
@@ -241,7 +175,6 @@ class ConvColumn(torch.nn.Module):
             f'Building convolutional TNN layer with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}')
 
     def forward(self, input_spikes, mu_capture=0.2000, mu_backoff=-0.4000, mu_search=0.0001):
-
         potentials = self.get_potentials(input_spikes)
         output_spikes = self.winner_takes_all(potentials)
         if self.training:
@@ -264,28 +197,28 @@ class ConvColumn(torch.nn.Module):
     def winner_takes_all(self, potentials):
         batch, channel, neuron_x, neuron_y, time = potentials.shape
         potentials = potentials.reshape(
-            batch, channel, neuron_x * neuron_y, time).permute(3, 1, 0, 2)
+            batch, channel, neuron_x * neuron_y, time).permute(3, 0, 2, 1)
         # time to step out of depression, with initial 0 and constrains >= 0
         depression = torch.zeros(
-            channel, batch, neuron_x * neuron_y, dtype=torch.int32, device=potentials.device)
+            batch, neuron_x * neuron_y, channel, dtype=torch.int32, device=potentials.device)
         # return winners of the same shape as potentials
-        winners = torch.zeros(time, channel, batch, neuron_x *
-                              neuron_y, dtype=torch.int32, device=potentials.device)
+        winners = torch.zeros(time, batch, neuron_x * neuron_y, channel, dtype=torch.int32, device=potentials.device)
         for t in range(time):
             potential_t = potentials[t] * (depression == 0).int()
             winner_t = potential_t.argmax(-1).unsqueeze(-1)
             spike_t = (potential_t.gather(-1, winner_t) > self.theta).int()
             winners[t].scatter_(-1, winner_t, spike_t)
-            depression += winners[t].sum(0).unsqueeze(0) * self.fodep
+            depression += winners[t].sum(-1).unsqueeze(-1) * self.fodep
             depression = (depression - 1).clip(0, self.fodep - 1)
             # TODO k limitation per channel
-        return winners.permute(2, 1, 0, 3).reshape(batch, channel, neuron_x, neuron_y, time).float()
+        return winners.permute(1, 3, 2, 0).reshape(batch, channel, neuron_x, neuron_y, time).float()
 
     def stdp(self, potentials, output_spikes, mu_capture, mu_backoff, mu_search):
-        batch, channel, neuron_x, neuron_y, time = output_spikes.shape
+        batch, _channel, neuron_x, neuron_y, _time = output_spikes.shape
         capture_grad, = torch.autograd.grad(
             (potentials * output_spikes).sum(), self.weight, retain_graph=True)
         search_grad, = torch.autograd.grad(potentials.sum(), self.weight)
+        search_grad /= (self.weight * self.response_function.kernel_size).floor() + 1
         backoff_grad = output_spikes.sum(
             (0, 2, 3, 4)).reshape(-1, 1, 1, 1) - capture_grad
         update = (
