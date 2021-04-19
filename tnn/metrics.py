@@ -18,7 +18,7 @@ class AutoMatchingMatrix:
     def describe(self):
         G = {
             f'label-{label}': {
-                f'output-{output}': self.mat[label, output]
+                f'output-{output}': self.mat[label, output] + 1
                 for output in range(self.n_outputs)
             }
             for label in range(self.n_labels)
@@ -50,4 +50,4 @@ class AutoMatchingMatrix:
         return accuracy, precision, recall
     
     def describe_print_clear(self):
-        print('Acuracy: {:.4f}; Precision: {:.4f}; Recall: {:.4f}'.format(*self.describe()))
+        print('Accuracy: {:.4f}; Precision: {:.4f}; Recall: {:.4f}'.format(*self.describe()))
