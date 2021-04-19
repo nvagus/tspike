@@ -124,9 +124,11 @@ class FullColumn(torch.nn.Module):
 
         capture_grad, = torch.autograd.grad(
             (potentials * output_spikes).sum(), self.weight, retain_graph=True)
-        search_grad, = torch.autograd.grad(potentials.sum(), self.weight) 
-        search_grad /= (self.weight * self.response_function.kernel_size).floor() + 1
-        backoff_grad = output_spikes.sum((0, 2, 3)).unsqueeze(-1) - capture_grad
+        search_grad, = torch.autograd.grad(potentials.sum(), self.weight)
+        search_grad /= (self.weight *
+                        self.response_function.kernel_size).floor() + 1
+        backoff_grad = output_spikes.sum(
+            (0, 2, 3)).unsqueeze(-1) - capture_grad
 
         update = (
             capture_grad * mu_capture +
@@ -202,7 +204,8 @@ class ConvColumn(torch.nn.Module):
         depression = torch.zeros(
             batch, neuron_x * neuron_y, channel, dtype=torch.int32, device=potentials.device)
         # return winners of the same shape as potentials
-        winners = torch.zeros(time, batch, neuron_x * neuron_y, channel, dtype=torch.int32, device=potentials.device)
+        winners = torch.zeros(time, batch, neuron_x * neuron_y,
+                              channel, dtype=torch.int32, device=potentials.device)
         for t in range(time):
             potential_t = potentials[t] * (depression == 0).int()
             winner_t = potential_t.argmax(-1).unsqueeze(-1)
@@ -218,7 +221,8 @@ class ConvColumn(torch.nn.Module):
         capture_grad, = torch.autograd.grad(
             (potentials * output_spikes).sum(), self.weight, retain_graph=True)
         search_grad, = torch.autograd.grad(potentials.sum(), self.weight)
-        search_grad /= (self.weight * self.response_function.kernel_size).floor() + 1
+        search_grad /= (self.weight *
+                        self.response_function.kernel_size).floor() + 1
         backoff_grad = output_spikes.sum(
             (0, 2, 3, 4)).reshape(-1, 1, 1, 1) - capture_grad
         update = (

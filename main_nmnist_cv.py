@@ -42,35 +42,38 @@ class Interrupter:
 @click.option('--model-path', default='model/n-mnist-cv')
 def main(
     gpu, batch, epochs, supervised,
-    x_max, y_max, t_max, 
+    x_max, y_max, t_max,
     step, leak,
     forced_dep, dense, w_init, channel,
     capture, backoff, search,
     train_path, test_path, model_path,
     **kwargs
 ):
-    if torch.cuda.is_available():  
-        dev = f'cuda:{gpu}' 
-    else:  
+    if torch.cuda.is_available():
+        dev = f'cuda:{gpu}'
+    else:
         dev = 'cpu'
     device = torch.device(dev)
 
-    print(f'Device: {device}, Batch: {batch}, Epochs: {epochs}, Supervised: {supervised}')
+    print(
+        f'Device: {device}, Batch: {batch}, Epochs: {epochs}, Supervised: {supervised}')
     print(f'Forced Dep: {forced_dep}, Dense: {dense}, Weight Init: {w_init}')
 
-    train_data_loader = DataLoader(NMnistSampled(train_path, x_max, y_max, t_max, device=device), shuffle=True, batch_size=batch)
-    test_data_loader = DataLoader(NMnistSampled(test_path, x_max, y_max, t_max, device=device), batch_size=batch)
+    train_data_loader = DataLoader(NMnistSampled(
+        train_path, x_max, y_max, t_max, device=device), shuffle=True, batch_size=batch)
+    test_data_loader = DataLoader(NMnistSampled(
+        test_path, x_max, y_max, t_max, device=device), batch_size=batch)
 
     model = ConvColumn(
-        input_channel=2, output_channel=channel, 
+        input_channel=2, output_channel=channel,
         kernel=3, stride=2,
         step=step, leak=leak,
         dense=dense, fodep=forced_dep, w_init=w_init
     ).to(device)
-    
+
     def descriptor():
         return ','.join('{:.0f}'.format(x) for x in model.weight.sum((1, 2, 3)).detach())
-    
+
     def othogonal():
         oc, ic, x, y = model.weight.shape
         w = model.weight.reshape(oc, -1)
@@ -85,17 +88,17 @@ def main(
         with Interrupter():
             for data, label in train_data_iterator:
                 input_spikes = data
-                output_spikes = model.forward(input_spikes, mu_capture=capture, mu_backoff=backoff, mu_search=search)
+                output_spikes = model.forward(
+                    input_spikes, mu_capture=capture, mu_backoff=backoff, mu_search=search)
                 train_data_iterator.set_description(
-                    f'weight sum:{descriptor()}; ' 
+                    f'weight sum:{descriptor()}; '
                     f'weight othogonal:{othogonal():.4f}; '
                     f'total spikes:{output_spikes.sum().int()}; '
                     f'time coverage:{(output_spikes.sum((1, 2, 3)) > 0).float().mean() * 100:.2f}')
-        
+
         model.train(mode=False)
         torch.save(model.state_dict(), model_path)
 
-        
         features = []
         labels = []
         with Interrupter():
@@ -107,11 +110,10 @@ def main(
         X_train = np.vstack(features)
         Y_train = np.hstack(labels)
 
-        
         features = []
         labels = []
         with Interrupter():
-            for data, label in tqdm(train_data_loader):
+            for data, label in tqdm(test_data_loader):
                 output_spikes = model.forward(data)
                 feature = output_spikes.sum((-1, -2, -3)).cpu().numpy()
                 features.append(feature)
@@ -126,6 +128,7 @@ def main(
         print(confusion_matrix(Y_test, Y_pred))
 
     return 0
+
 
 if __name__ == '__main__':
     exit(main())

@@ -42,31 +42,34 @@ def eval_callback(ctx, param, value):
 @click.option('--model-path', default='model/n-mnist-2')
 def main(
     gpu, batch, epochs, supervised,
-    x_max, y_max, t_max, 
+    x_max, y_max, t_max,
     neurons, channels,
     step, leak,
     theta, dense, forced_dep, w_init,
     train_path, test_path, model_path,
     **kwargs
 ):
-    if torch.cuda.is_available():  
-        dev = f'cuda:{gpu}' 
-    else:  
+    if torch.cuda.is_available():
+        dev = f'cuda:{gpu}'
+    else:
         dev = 'cpu'
     device = torch.device(dev)
 
-    print(f'Device: {device}, Batch: {batch}, Epochs: {epochs}, Supervised: {supervised}')
+    print(
+        f'Device: {device}, Batch: {batch}, Epochs: {epochs}, Supervised: {supervised}')
     print(f'Forced Dep: {forced_dep}, Dense: {dense}, Weight Init: {w_init}')
 
-    train_data_loader = DataLoader(NMnistSampled(train_path, x_max, y_max, t_max, device=device), shuffle=True, batch_size=batch)
-    test_data_loader = DataLoader(NMnistSampled(test_path, x_max, y_max, t_max, device=device), batch_size=batch)
+    train_data_loader = DataLoader(NMnistSampled(
+        train_path, x_max, y_max, t_max, device=device), shuffle=True, batch_size=batch)
+    test_data_loader = DataLoader(NMnistSampled(
+        test_path, x_max, y_max, t_max, device=device), batch_size=batch)
 
     model = StackFullColumn(
         [x_max * y_max, *neurons], [2, *channels], kernel=2,
         step=step, leak=leak,
         theta=theta, dense=dense, fodep=forced_dep, w_init=w_init
     ).to(device)
-    
+
     def descriptor():
         return ','.join('{:.0f}'.format(c.weight.sum()) for c in model.columns)
 
@@ -79,12 +82,15 @@ def main(
             for data, label in train_data_iterator:
                 input_spikes = data.reshape(-1, 2, x_max * y_max, t_max)
                 if supervised:
-                    output_spikes = model.forward(input_spikes, label.to(device))
+                    output_spikes = model.forward(
+                        input_spikes, label.to(device))
                 else:
                     output_spikes = model.forward(input_spikes)
-                accurate = (output_spikes.sum((-3, -2, -1)) > 0).logical_and(output_spikes.sum((-3, -1)).argmax(-1) == label.to(device)).sum()
-                train_data_iterator.set_description(f'{descriptor()}; {output_spikes.sum()}, {accurate}')
-        
+                accurate = (output_spikes.sum((-3, -2, -1)) > 0).logical_and(
+                    output_spikes.sum((-3, -1)).argmax(-1) == label.to(device)).sum()
+                train_data_iterator.set_description(
+                    f'{descriptor()}; {output_spikes.sum()}, {accurate}')
+
         model.train(mode=False)
         auto_matcher = AutoMatchingMatrix(10, 10)
         with Interrupter():
@@ -98,13 +104,15 @@ def main(
                 for has_spike, y_pred, y_true in zip(has_spikes.cpu().numpy(), y_preds.cpu().numpy(), label.numpy()):
                     if has_spike:
                         auto_matcher.add_sample(y_true, y_pred)
-        
+
         print(auto_matcher.mat)
-        print(f'Coverage: {auto_matcher.mat.sum() / len(test_data_loader.dataset)}')
+        print(
+            f'Coverage: {auto_matcher.mat.sum() / len(test_data_loader.dataset)}')
         auto_matcher.describe_print_clear()
         torch.save(model.state_dict(), model_path)
 
     return 0
+
 
 if __name__ == '__main__':
     exit(main())
