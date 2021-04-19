@@ -1,10 +1,13 @@
 import click
+import numpy as np
 import torch
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.metrics import accuracy_score, confusion_matrix
 from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm
 
 from dataset import NMnistSampled
-from tnn import AutoMatchingMatrix, ConvColumn
+from tnn import ConvColumn
 
 
 class Interrupter:
@@ -15,17 +18,6 @@ class Interrupter:
         if exc_type is KeyboardInterrupt:
             return True
         return exc_type is None
-
-
-class LinearModel(torch.nn.Module):
-    def __init__(self, input_size, output_size):
-        super(LinearModel, self).__init__()
-        self.layer = torch.nn.Linear(input_size, output_size)
-    
-    def forward(self, input_data):
-        output = self.layer(input_data)
-        logits = torch.log_softmax(output, dim=1)
-        return logits
 
 
 @click.command()
@@ -103,36 +95,35 @@ def main(
         model.train(mode=False)
         torch.save(model.state_dict(), model_path)
 
-        train_data_iterator = tqdm(train_data_loader)
-        batch, channel, neuron_x, neuron_y, time = output_spikes.shape
-        tester = LinearModel(channel * neuron_x * neuron_y, 10).to(device)
-        tester.train()
-        optimizer = torch.optim.Adam(model.parameters())
-        error = torch.nn.CrossEntropyLoss()
-        with Interrupter():
-            for data, label in train_data_iterator:
-                input_spikes = data
-                output_spikes = model.forward(input_spikes)
-                optimizer.zero_grad()
-                output = tester.forward(output_spikes.sum(-1).reshape(-1, channel * neuron_x * neuron_y))
-                loss = error(output, label.to(device))
-                train_data_iterator.set_description(f'loss={loss.detach().cpu().numpy():.4f}')
-                loss.backward()
-                optimizer.step()
-
-        auto_matcher = AutoMatchingMatrix(10, 10)
-        test_data_iterator = tqdm(test_data_loader)
-        with Interrupter():
-            for data, label in test_data_iterator:
-                input_spikes = data
-                output_spikes = model.forward(input_spikes)
-                output = tester.forward(output_spikes.sum(-1).reshape(-1, channel * neuron_x * neuron_y)).argmax(-1).cpu()
-                for y_pred, y_true in zip(output, label):
-                    auto_matcher.add_sample(y_true, y_pred)
         
-        print(auto_matcher.mat)
+        features = []
+        labels = []
         with Interrupter():
-            auto_matcher.describe_print_clear()
+            for data, label in tqdm(train_data_loader):
+                output_spikes = model.forward(data)
+                feature = output_spikes.sum((-1, -2, -3)).cpu().numpy()
+                features.append(feature)
+                labels.append(label.numpy())
+        X_train = np.vstack(features)
+        Y_train = np.hstack(labels)
+
+        
+        features = []
+        labels = []
+        with Interrupter():
+            for data, label in tqdm(train_data_loader):
+                output_spikes = model.forward(data)
+                feature = output_spikes.sum((-1, -2, -3)).cpu().numpy()
+                features.append(feature)
+                labels.append(label.numpy())
+        X_test = np.vstack(features)
+        Y_test = np.hstack(labels)
+
+        tester = GradientBoostingClassifier()
+        tester.fit(X_train, Y_train)
+        Y_pred = tester.predict(X_test)
+        print('accuracy: ', accuracy_score(Y_test, Y_pred))
+        print(confusion_matrix(Y_test, Y_pred))
 
     return 0
 
