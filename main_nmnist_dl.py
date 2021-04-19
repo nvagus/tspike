@@ -115,9 +115,9 @@ def main(
     for epoch in range(epochs):
         print(f"epoch: {epoch}")
         training = tqdm(train_data_loader)
-        for sample in training:
-            data = transform(sample['data'])
-            labels = sample['label'].to(device)
+        for data, labels in training:
+            data = transform(data)
+            labels = labels.to(device)
             optimizer.zero_grad()
             output = model.forward(data)
             loss = error(output, labels.cuda())
@@ -126,9 +126,8 @@ def main(
             optimizer.step()
             
         auto_matcher = AutoMatchingMatrix(10, 10)
-        for sample in tqdm(test_data_loader):
-            data = transform(sample['data'])
-            labels = sample['label']
+        for data, labels in tqdm(test_data_loader):
+            data = transform(data)
             output = model.forward(data).argmax(axis=-1).cpu()
             for y_pred, y_true in zip(output, labels):
                 auto_matcher.add_sample(y_true, y_pred)
