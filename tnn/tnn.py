@@ -8,7 +8,7 @@ class StepFireLeak:
         self.step = step
         self.leak = leak
         self.kernel_size = step + leak
-        self.padding = int(np.ceil((self.kernel_size + self.step) / 2))
+        self.padding = self.kernel_size
         self.fodep = self.kernel_size
 
     def get_weight_kernel(self, weight):
@@ -55,17 +55,14 @@ class FullColumn(torch.nn.Module):
         print(
             f'Building full connected TNN layer with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}')
 
-    def forward(self, input_spikes, labels=None, bias=0.5):
+    def forward(self, input_spikes, labels=None, bias=0.5, mu_capture=0.2000, mu_backoff=-0.2000, mu_search=0.0001):
         potentials = self.get_potentials(input_spikes, labels, bias)
         output_spikes = self.winner_takes_all(potentials)
-        if self.training:
-            self.stdp(potentials, output_spikes)
-            # self.stdp_(input_spikes, output_spikes)
-            # update = self.stdp(potentials, output_spikes)
-            # update_ = self.stdp_(input_spikes, output_spikes,)
 
-            # import code
-            # code.interact(local=locals())
+        if self.training:
+            # print("input_spikes sum", input_spikes.sum())
+            self.stdp(potentials, input_spikes, output_spikes, mu_capture=mu_capture,
+                      mu_backoff=mu_backoff, mu_search=mu_search)
 
         return output_spikes
 
@@ -82,39 +79,42 @@ class FullColumn(torch.nn.Module):
             batch, self.output_channel, self.neurons, -1)
         if labels is not None:
             batch, channel, neurons, time = potentials.shape
-            supervision = torch.zeros(batch, neurons, dtype=torch.int32, device=labels.device).scatter(
+            supervision = torch.zeros(batch, channel, dtype=torch.int32, device=labels.device).scatter(
                 1, labels.unsqueeze(-1), bias * self.theta
-            ).unsqueeze(1).expand(-1, channel, -1).unsqueeze(-1)
+            ).unsqueeze(-1).expand(-1, -1, neurons).unsqueeze(-1)
+            # supervision (batch, channel, neurons, 1)
             potentials = potentials + supervision
         else:
             potentials = potentials + bias * self.theta
         return potentials
 
     def winner_takes_all(self, potentials):
-        # move time axis to 0 for better performance
         batch, channel, neurons, time = potentials.shape
-        potentials = potentials.permute(3, 1, 0, 2)
+
+        # move time axis to 0 for better performance
+        potentials = potentials.permute(3, 0, 2, 1)
+
         # time to step out of depression, with initial 0 and constrains >= 0
         depression = torch.zeros(
-            channel, batch, neurons, dtype=torch.int32, device=potentials.device)
+            batch, neurons, channel, dtype=torch.int32, device=potentials.device)
         # return winners of the same shape as potentials
-        winners = torch.zeros(time, channel, batch, neurons,
+        winners = torch.zeros(time, batch, neurons, channel,
                               dtype=torch.int32, device=potentials.device)
+
         # iterate time axis: get the winner for each batch, channel of neurons, update winners and depression
         for t in range(time):
-            for c in range(channel):
-                potential_tc = potentials[t, c] * (depression[c] == 0).int()
-                winner_tc = potential_tc.argmax(-1).unsqueeze(-1)
-                spike_tc = (potential_tc.gather(-1, winner_tc)
-                            > self.theta).int()
-                winners[t, c].scatter_(-1, winner_tc, spike_tc)
-                depression[c].scatter_add_(-1,
-                                           winner_tc, -spike_tc * self.fodep)
-                depression[c] += spike_tc * self.fodep
-                depression += winners[t, c].unsqueeze(0) * self.fodep
+            # channel, batch, neurons
+            potential_t = potentials[t] * (depression == 0).int()
+            winner_t = potential_t.argmax(-1).unsqueeze(-1)
+
+            spike_t = (potential_t.gather(-1, winner_t)
+                       > self.theta).int()
+            winners[t].scatter_(-1, winner_t, spike_t)
+            depression += winners[t].sum(-1).unsqueeze(-1) * self.fodep
             depression = (depression - 1).clip(0, self.fodep - 1)
-        # move time axis to -1 for the convenience of convolutional operations
-        return winners.permute(2, 1, 3, 0).float()
+            # TODO k limitation per channel
+
+        return winners.permute(1, 3, 2, 0).float()
 
     def stdp_(
         self,
@@ -165,20 +165,34 @@ class FullColumn(torch.nn.Module):
 
     def stdp(
         self,
-        potentials, output_spikes,
-        mu_capture=0.0200, mu_backoff=-0.0200, mu_search=0.0001
+        potentials, input_spikes, output_spikes,
+        mu_capture, mu_backoff, mu_search
     ):
 
         batch, _channel, neurons, _time = output_spikes.shape
 
         capture_grad, = torch.autograd.grad(
             (potentials * output_spikes).sum(), self.weight, retain_graph=True)
-        search_grad, = torch.autograd.grad(potentials.sum(), self.weight)
-        backoff_grad = output_spikes.sum((0, 2, 3)).repeat(
-            neurons).reshape(-1, 1) - capture_grad
+        search_grad, = torch.autograd.grad(
+            potentials.sum(), self.weight, retain_graph=True)
+        search_grad /= (self.weight *
+                        self.response_function.kernel_size).floor() + 1
 
-        # import code
-        # code.interact(local=locals())
+        # nan -> 0
+        # random number -> every digig
+
+        # search_grad = search_grad.nan_to_num(0)
+        # search_grad[search_grad.isnan()] = 0
+        # search_grad[search_grad.isinf()] = 0
+        # delta = input_spikes.sum() - search_grad.sum()
+        # search_grad += delta / np.prod(search_grad.shape)
+
+        if search_grad.isnan().any():
+            import code
+            code.interact(local=locals())
+
+        backoff_grad = output_spikes.sum(
+            (0, 2, 3)).unsqueeze(-1) - capture_grad
 
         update = (
             capture_grad * mu_capture +
@@ -227,6 +241,7 @@ class ConvColumn(torch.nn.Module):
             f'Building convolutional TNN layer with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}')
 
     def forward(self, input_spikes, mu_capture=0.2000, mu_backoff=-0.4000, mu_search=0.0001):
+
         potentials = self.get_potentials(input_spikes)
         output_spikes = self.winner_takes_all(potentials)
         if self.training:
