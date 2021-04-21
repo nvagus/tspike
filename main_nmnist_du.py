@@ -32,7 +32,7 @@ class Interrupter:
 @click.option('-k', '--dual', default=0.05)
 @click.option('--capture', default=0.20)
 @click.option('--backoff', default=-0.20)
-@click.option('--search', default=0.01)
+@click.option('--search', default=0.001)
 @click.option('-S/-U', '--supervised/--unsupervised', default=True)
 @click.option('--train-path', default='data/n-mnist/TrainSP')
 @click.option('--test-path', default='data/n-mnist/TestSP')
