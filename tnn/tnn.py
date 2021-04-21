@@ -138,7 +138,7 @@ class FullColumn(torch.nn.Module):
         capture_grad, = torch.autograd.grad(
             (potentials * output_spikes).sum(), self.weight, retain_graph=True)
         capture_grad = capture_grad.min(total_spikes)
-        search_grad, = torch.autograd.grad(potentials.sum(), self.weight)
+        search_grad, = torch.autograd.grad(potentials.sum() / self.response_function.kernel_size, self.weight)
         backoff_grad = total_spikes - capture_grad
 
         update = (
@@ -150,7 +150,7 @@ class FullColumn(torch.nn.Module):
         ) / (
             batch * neurons
         )
-
+        
         with torch.no_grad():
             self.weight.add_(update).clip_(0, 1)
 
