@@ -30,8 +30,8 @@ class Interrupter:
 @click.option('-s', '--step', default=16)
 @click.option('-l', '--leak', default=32)
 @click.option('-c', '--channel', default=10)
-@click.option('--capture', default=0.2000)
-@click.option('--backoff', default=-0.2000)
+@click.option('--capture', default=0.200)
+@click.option('--backoff', default=-0.200)
 @click.option('--search', default=0.001)
 @click.option('-S/-U', '--supervised/--unsupervised', default=True)
 @click.option('--train-path', default='data/n-mnist/TrainSP')
@@ -68,7 +68,7 @@ def main(
     ).to(device)
 
     def descriptor():
-        return ','.join('{:.0f}'.format(x) for x in model.weight.sum(axis=1))
+        return ','.join(f'{x * 100:.0f}' for x in model.weight.mean(-1))
 
     for epoch in range(epochs):
         model.train(mode=True)
