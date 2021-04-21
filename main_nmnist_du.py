@@ -25,14 +25,12 @@ class Interrupter:
 @click.option('-y', '--y-max', default=34)
 @click.option('-t', '--t-max', default=256)
 @click.option('-f', '--forced-dep', default=0)
-@click.option('-d', '--dense', default=0.15)
-@click.option('-w', '--w-init', default=0.5)
+@click.option('-d', '--dense', default=0.1)
 @click.option('-s', '--step', default=16)
 @click.option('-l', '--leak', default=32)
-@click.option('-k', '--dual', default=0.05)
-@click.option('--capture', default=0.20)
-@click.option('--backoff', default=-0.20)
-@click.option('--search', default=0.001)
+@click.option('--capture', default=0.50)
+@click.option('--backoff', default=-0.50)
+@click.option('--search', default=0.01)
 @click.option('-S/-U', '--supervised/--unsupervised', default=True)
 @click.option('--train-path', default='data/n-mnist/TrainSP')
 @click.option('--test-path', default='data/n-mnist/TestSP')
@@ -41,7 +39,7 @@ def main(
     gpu, batch, epochs, supervised,
     x_max, y_max, t_max,
     step, leak,
-    forced_dep, dense, w_init, dual,
+    forced_dep, dense, 
     capture, backoff, search,
     train_path, test_path, model_path,
     **kwargs
@@ -52,9 +50,9 @@ def main(
         dev = 'cpu'
     device = torch.device(dev)
 
-    print(
-        f'Device: {device}, Batch: {batch}, Epochs: {epochs}, Supervised: {supervised}')
-    print(f'Forced Dep: {forced_dep}, Dense: {dense}, Weight Init: {w_init}')
+    print(f'Device: {device}, Batch: {batch}, Supervised: {supervised}')
+    print(f'Forced Dep: {forced_dep}, Dense: {dense}')
+    print(f'Capture: {capture}, Backoff: {backoff}, Search: {search}')
 
     train_data_loader = DataLoader(NMnistSampled(
         train_path, x_max, y_max, t_max, device=device), shuffle=True, batch_size=batch)
@@ -64,13 +62,12 @@ def main(
     model = FullDualColumn(
         x_max * y_max, 1, input_channel=2, output_channel=10,
         step=step, leak=leak,
-        dense=dense, fodep=forced_dep, w_init=w_init, dual=dual
+        dense=dense, fodep=forced_dep
     ).to(device)
 
     def descriptor():
         return (
-            f"{','.join('{:.0f}'.format(x) for x in model.weight_pos.sum(axis=1))}; "
-            f"{','.join('{:.0f}'.format(x) for x in model.weight_neg.sum(axis=1))}"
+            f"{','.join(f'{x*100:.0f}' for x in model.weight.mean(axis=1))}; "
         )
 
     for epoch in range(epochs):

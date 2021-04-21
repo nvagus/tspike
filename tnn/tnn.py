@@ -1,6 +1,6 @@
 import torch
 from torch.distributions.exponential import Exponential
-
+import torch.nn as nn
 
 class StepFireLeakKernel(torch.autograd.Function):
     @staticmethod
@@ -21,7 +21,7 @@ class StepFireLeakKernel(torch.autograd.Function):
         return grad_output.sum(-1), None, None
 
 
-class StepFireLeak(torch.nn.Module):
+class StepFireLeak(nn.Module):
     def __init__(self, step=16, leak=32):
         super(StepFireLeak, self).__init__()
         self.step = step
@@ -34,7 +34,7 @@ class StepFireLeak(torch.nn.Module):
         return StepFireLeakKernel.apply(weight, self.step, self.leak)
 
 
-class FullColumn(torch.nn.Module):
+class FullColumn(nn.Module):
     def __init__(
         self,
         synapses, neurons, input_channel=1, output_channel=1,
@@ -58,7 +58,7 @@ class FullColumn(torch.nn.Module):
         self.fodep = fodep = fodep or self.response_function.fodep
         assert fodep >= self.response_function.fodep, f'forced depression should be at least {self.response_function.fodep}'
         # initialize weight to w_init
-        self.weight = torch.nn.parameter.Parameter(
+        self.weight = nn.parameter.Parameter(
             Exponential(1 / w_init).sample((self.output_channel *
                                             self.neurons, self.input_channel * self.synapses)).clip(0, 1),
             requires_grad=True
@@ -82,7 +82,7 @@ class FullColumn(torch.nn.Module):
         input_spikes = input_spikes.reshape(batch, channel * synapses, time)
         # perform conv1d to compute potentials
         w_kernel = self.response_function.forward(self.weight)
-        potentials = torch.nn.functional.conv1d(
+        potentials = nn.functional.conv1d(
             input_spikes, w_kernel, padding=self.response_function.padding)
         # expand output channel and neurons
         potentials = potentials.reshape(
@@ -155,7 +155,7 @@ class FullColumn(torch.nn.Module):
             self.weight.add_(update).clip_(0, 1)
 
 
-class ConvColumn(torch.nn.Module):
+class ConvColumn(nn.Module):
     def __init__(
         self,
         input_channel=1, output_channel=1,
@@ -179,7 +179,7 @@ class ConvColumn(torch.nn.Module):
         self.fodep = fodep = fodep or self.response_function.fodep
         assert fodep >= self.response_function.fodep, f'forced depression should be at least {self.response_function.fodep}'
         # initialize weight to w_init
-        self.weight = torch.nn.parameter.Parameter(
+        self.weight = nn.parameter.Parameter(
             Exponential(1 / w_init).sample((self.output_channel,
                                             self.input_channel, self.kernel, self.kernel)).clip(0, 1),
             requires_grad=True
@@ -200,7 +200,7 @@ class ConvColumn(torch.nn.Module):
         input_spikes = input_spikes.permute(0, 1, 4, 2, 3)
         w_kernel = self.response_function.forward(
             self.weight).permute(0, 1, 4, 2, 3)
-        potentials = torch.nn.functional.conv3d(
+        potentials = nn.functional.conv3d(
             input_spikes, w_kernel,
             stride=(1, self.stride, self.stride),
             padding=(self.response_function.padding, 0, 0)
@@ -229,13 +229,13 @@ class ConvColumn(torch.nn.Module):
 
     def stdp(self, potentials, output_spikes, mu_capture, mu_backoff, mu_search):
         batch, _channel, neuron_x, neuron_y, _time = output_spikes.shape
-        capture_grad, = torch.autograd.grad(
-            (potentials * output_spikes).sum(), self.weight, retain_graph=True)
-        search_grad, = torch.autograd.grad(potentials.sum(), self.weight)
-        search_grad /= (self.weight *
-                        self.response_function.kernel_size).floor() + 1
-        backoff_grad = output_spikes.sum(
-            (0, 2, 3, 4)).reshape(-1, 1, 1, 1) - capture_grad
+        total_spike = output_spikes.sum((0, 2, 3, 4)).reshape(-1, 1, 1, 1)
+
+        capture_grad, = torch.autograd.grad((potentials * output_spikes).sum(), self.weight, retain_graph=True)
+        capture_grad = capture_grad.min(total_spike)
+        backoff_grad = total_spike - capture_grad
+        search_grad, = torch.autograd.grad(potentials.sum() / self.response_function.kernel_size, self.weight)
+
         update = (
             capture_grad * mu_capture +
             backoff_grad * mu_backoff +
@@ -250,13 +250,12 @@ class ConvColumn(torch.nn.Module):
             self.weight.add_(update).clip_(0, 1)
 
 
-class FullDualColumn(torch.nn.Module):
+class FullDualColumn(nn.Module):
     def __init__(
         self,
         synapses, neurons, input_channel=1, output_channel=1,
         step=16, leak=32,
-        fodep=None, w_init=0., theta=None, dense=None,
-        dual=0.05
+        fodep=None, theta=None, dense=None
     ):
         super(FullDualColumn, self).__init__()
 
@@ -274,23 +273,14 @@ class FullDualColumn(torch.nn.Module):
         self.response_function = StepFireLeak(step, leak)
         self.fodep = fodep = fodep or self.response_function.fodep
         assert fodep >= self.response_function.fodep, f'forced depression should be at least {self.response_function.fodep}'
-        self.dual = dual
-        assert dual < dense, 'too much duality, try to set a smaller one'
         # initialize weight to w_init
-        self.weight_pos = torch.nn.parameter.Parameter(
-            Exponential(1 / w_init).sample((self.output_channel *
-                                            self.neurons, self.input_channel * self.synapses)).clip(0, 1),
-            requires_grad=True
-        )
-        self.weight_neg = torch.nn.parameter.Parameter(
-            torch.zeros(self.output_channel * self.neurons,
-                        self.input_channel * self.synapses),
-            requires_grad=True
-        )
-        print(
-            f'Building full connected dual TNN layer with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}, dual={dual}')
+        self.weight_ = nn.parameter.Parameter(torch.zeros(self.output_channel * self.neurons, self.input_channel * self.synapses), requires_grad=True)
+        nn.init.kaiming_normal_(self.weight_)
+        self.weight = torch.sigmoid(self.weight_)
+        print(f'Building full connected TNN column with theta={theta:.4f}, dense={dense:.4f}, fodep={fodep}')
 
     def forward(self, input_spikes, labels=None, bias=0.5, mu_capture=0.2000, mu_backoff=-0.2000, mu_search=0.0001):
+        self.weight = torch.sigmoid(self.weight_)
         potentials = self.get_potentials(input_spikes, labels, bias)
         output_spikes = self.winner_takes_all(potentials)
 
@@ -301,21 +291,13 @@ class FullDualColumn(torch.nn.Module):
         return output_spikes
 
     def get_potentials(self, input_spikes, labels=None, bias=0.5):
-        assert self.dual < (
-            1 - bias) * self.dense, 'This bias is too large to use with the current dual value'
         # coalesce input channel and synpases
         batch, channel, synapses, time = input_spikes.shape
         input_spikes = input_spikes.reshape(batch, channel * synapses, time)
         # perform conv1d to compute potentials
-        w_pos_kernel = self.response_function.forward(self.weight_pos)
-        w_neg_kernel = self.response_function.forward(self.weight_neg)
-        potentials = torch.nn.functional.conv1d(
-            input_spikes, w_pos_kernel - self.dual * w_neg_kernel, padding=self.response_function.padding)
-        with torch.no_grad():
-            dual_bias = self.dual * \
-                self.weight_neg.mean(-1, keepdim=True).unsqueeze(0)
-        potentials += dual_bias
-
+        w_kernel = self.response_function.forward(self.weight)
+        potentials = nn.functional.conv1d(
+            input_spikes, w_kernel, padding=self.response_function.padding)
         # expand output channel and neurons
         potentials = potentials.reshape(
             batch, self.output_channel, self.neurons, -1)
@@ -365,40 +347,22 @@ class FullDualColumn(torch.nn.Module):
     ):
         batch, _channel, neurons, _time = output_spikes.shape
 
-        active_potentials = (potentials * output_spikes).sum()
         total_spikes = output_spikes.sum((0, 2, 3)).unsqueeze(-1)
 
         capture_grad, = torch.autograd.grad(
-            active_potentials, self.weight_pos, retain_graph=True)
-        surrander_grad, = torch.autograd.grad(
-            active_potentials, self.weight_neg, retain_graph=True)
-        surrander_grad /= self.dual
-        search_grad, = torch.autograd.grad(potentials.sum(), self.weight_pos)
-        search_grad /= (self.weight_pos *
-                        self.response_function.kernel_size).floor() + 1
-
+            (potentials * output_spikes).sum(), self.weight, retain_graph=True)
+        capture_grad = capture_grad.min(total_spikes)
+        search_grad, = torch.autograd.grad(potentials.sum() / self.response_function.kernel_size, self.weight)
         backoff_grad = total_spikes - capture_grad
-        compete_grad = -total_spikes - surrander_grad
 
-        update_pos = (
+        update = (
             capture_grad * mu_capture +
             backoff_grad * mu_backoff +
             search_grad * mu_search
         ) * (
-            (self.weight_pos * (1 - self.weight_pos) * 3 + 0.25)
-        ) / (
-            batch * neurons
+            self.weight * (1 - self.weight)
         )
-
-        update_neg = (
-            surrander_grad * mu_backoff +
-            compete_grad * mu_capture
-        ) * (
-            (self.weight_neg * (1 - self.weight_pos) * 3 + 0.25)
-        ) / (
-            batch * neurons
-        )
-
+        
         with torch.no_grad():
-            self.weight_pos.add_(update_pos).clip_(0, 1)
-            self.weight_neg.add_(-update_neg).clip_(0, 1)
+            self.weight_.add_(update)
+            self.weight = torch.sigmoid(self.weight_)
