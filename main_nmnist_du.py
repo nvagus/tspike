@@ -28,8 +28,9 @@ class Interrupter:
 @click.option('-d', '--dense', default=0.1)
 @click.option('-s', '--step', default=16)
 @click.option('-l', '--leak', default=32)
-@click.option('--capture', default=0.50)
-@click.option('--backoff', default=-0.50)
+@click.option('-w', '--w-init', default=0.5)
+@click.option('--capture', default=0.20)
+@click.option('--backoff', default=-0.20)
 @click.option('--search', default=0.01)
 @click.option('-S/-U', '--supervised/--unsupervised', default=True)
 @click.option('--train-path', default='data/n-mnist/TrainSP')
@@ -39,7 +40,7 @@ def main(
     gpu, batch, epochs, supervised,
     x_max, y_max, t_max,
     step, leak,
-    forced_dep, dense, 
+    forced_dep, dense, w_init,
     capture, backoff, search,
     train_path, test_path, model_path,
     **kwargs
@@ -62,7 +63,7 @@ def main(
     model = FullDualColumn(
         x_max * y_max, 1, input_channel=2, output_channel=10,
         step=step, leak=leak,
-        dense=dense, fodep=forced_dep
+        dense=dense, fodep=forced_dep, w_init=w_init
     ).to(device)
 
     def descriptor():
