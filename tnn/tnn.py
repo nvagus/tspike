@@ -405,10 +405,8 @@ class FullDualColumn(nn.Module):
 
         # threshold parameters
         assert theta or dense, 'either theta or dense should be specified'
-        self.theta = theta = theta or dense * (synapses * input_channel)
-        self.dense = dense = dense or theta / (synapses * input_channel)
-        assert dense < 2 * input_channel * \
-            synapses, 'invalid theta or density, try setting a smaller value'
+        self.theta = theta = theta or dense
+        self.dense = dense = dense or theta
         w_init = w_init or dense
 
         # spiking control parameters
@@ -455,7 +453,7 @@ class FullDualColumn(nn.Module):
         potentials = nn.functional.conv1d(
             input_spikes, w_kernel, padding=self.response_function.padding)
         # normalize potentials by weight norm
-        potentials = potentials / self.weight.norm(dim=-1).reshape(1, -1, 1)
+        potentials = potentials / (self.weight.norm(2, dim=-1) ** 2).reshape(1, -1, 1)
         # expand output channel and neurons
         potentials = potentials.reshape(batch, self.output_channel, self.neurons, -1)
         # apply bias
