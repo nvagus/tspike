@@ -20,6 +20,7 @@ class Interrupter:
 @click.command()
 @click.option('-g', '--gpu', default=0)
 @click.option('-e', '--epochs', default=1)
+@click.option('-i', '--bias', default=0.5)
 @click.option('-b', '--batch', default=32)
 @click.option('-x', '--x-max', default=34)
 @click.option('-y', '--y-max', default=34)
@@ -39,7 +40,7 @@ class Interrupter:
 def main(
     gpu, batch, epochs, supervised,
     x_max, y_max, t_max,
-    step, leak,
+    step, leak, bias,
     forced_dep, dense, w_init,
     capture, backoff, search,
     train_path, test_path, model_path,
@@ -83,7 +84,7 @@ def main(
                     output_spikes = model.forward(
                         input_spikes, label.to(device), mu_capture=capture, mu_backoff=backoff, mu_search=search)
                 else:
-                    output_spikes = model.forward(input_spikes)
+                    output_spikes = model.forward(input_spikes, bias=0.5)
                 # output_spikes: bacth, channel, neuro, time
                 accurate = (output_spikes.sum((-3, -2, -1)) > 0).logical_and(
                     output_spikes.sum((-2, -1)).argmax(-1) == label.to(device)).sum()
@@ -106,7 +107,8 @@ def main(
 
         with Interrupter():
             print(auto_matcher.mat)
-            print(f'Coverage: {auto_matcher.mat.sum() / len(test_data_loader.dataset)}')
+            print(
+                f'Coverage: {auto_matcher.mat.sum() / len(test_data_loader.dataset)}')
             auto_matcher.describe_print_clear()
             torch.save(model.state_dict(), model_path)
 

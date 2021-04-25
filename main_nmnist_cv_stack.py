@@ -32,22 +32,21 @@ def eval_callback(ctx, param, value):
 @click.option('-y', '--y-max', default=34)
 @click.option('-t', '--t-max', default=256)
 @click.option('-f', '--forced-dep', default=0)
+# explore 0.1 < [0] < 0.3, 0.0069 < [1] < 0.02
 @click.option('-d', '--dense', default='[0.3,0.01]', callback=eval_callback)
-@click.option('-w', '--w-init', default=0.5)
-@click.option('-s', '--step', default=16)
-@click.option('-l', '--leak', default=32)
+@click.option('-w', '--w-init', default=0.3)
+@click.option('-s', '--step', default=4)
+@click.option('-l', '--leak', default=8)
 @click.option('-c', '--channel', default='[16,32]', callback=eval_callback)
-@click.option('-p', '--pooling-kernel', default=2)
+@click.option('-p', '--pooling-kernel', default=4)
 @click.option('--capture', default=0.2000)
-@click.option('--backoff', default=-0.2000)
-@click.option('--search', default=0.001)
-@click.option('--fc_step', default=7)
-@click.option('--fc_leak', default=51)
-@click.option('--fc_dense', default=0.15)
+@click.option('--backoff', default=-0.3000)
+@click.option('--search', default=0.0005)
+@click.option('--fc_step', default=16)
+@click.option('--fc_leak', default=32)
+@click.option('--fc_dense', default=0.15)  # explore 0 < fc_dense < 0.032
 @click.option('-r', '--depth-start', default=-1)
-@click.option('--train-path', default='data/n-mnist/TrainSP')
-@click.option('--test-path', default='data/n-mnist/TestSP')
-@click.option('--model-path', default='model/n-mnist-cv-stack')
+@click.option('--forced_dep', default=0)
 def main(
     gpu, batch, epochs,
     x_max, y_max, t_max,
