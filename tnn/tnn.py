@@ -405,8 +405,8 @@ class FullDualColumn(nn.Module):
 
         # threshold parameters
         assert theta or dense, 'either theta or dense should be specified'
-        self.theta = theta = theta or dense
-        self.dense = dense = dense or theta
+        self.theta = theta = theta or dense * (synapses * input_channel)
+        self.dense = dense = dense or theta / (synapses * input_channel)
         w_init = w_init or dense
 
         # spiking control parameters
@@ -453,9 +453,6 @@ class FullDualColumn(nn.Module):
         w_kernel = self.response_function.forward(self.weight)
         potentials = nn.functional.conv1d(
             input_spikes, w_kernel, padding=self.response_function.padding)
-        # normalize potentials by weight norm
-        potentials = potentials / \
-            (self.weight.norm(2, dim=-1) ** 2).reshape(1, -1, 1)
         # expand output channel and neurons
         potentials = potentials.reshape(
             batch, self.output_channel, self.neurons, -1)
@@ -505,10 +502,9 @@ class FullDualColumn(nn.Module):
             # spike@t: channel winner && neuron winner && over threshold
             c_winner_t = potential_t.argmax(-1).unsqueeze(-1)
             p_winner_t = potential_t.gather(-1, c_winner_t)
-            n_winner_t = potential_t.max(-2, keepdim=True)[1]
+            # n_winner_t = potential_t.max(-2, keepdim=True)[0]
 
-            spike_t = (p_winner_t > self.theta).logical_and(
-                p_winner_t == n_winner_t).int()
+            spike_t = (p_winner_t > self.theta).int()
             # set winner@t
             winners[t].scatter_(-1, c_winner_t, spike_t)
             # update depression
@@ -525,8 +521,8 @@ class FullDualColumn(nn.Module):
     ):
         batch, _channel, neurons, _time = output_spikes.shape
 
-        total_spikes = output_spikes.sum((0, 2, 3)).unsqueeze(-1)
-        has_spikes = total_spikes.any(1).reshape(-1).int()
+        total_spikes = output_spikes.sum((0, 3)).reshape(-1, 1)
+        has_spikes = output_spikes.any(0).any(-1).reshape(-1).int()
 
         capture_grad, = torch.autograd.grad(
             (potentials * output_spikes).sum(), self.weight, retain_graph=True)
