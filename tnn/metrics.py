@@ -58,9 +58,11 @@ class AutoMatchingMatrix:
 
 
 class SpikesTracer:
-    def __init__(self):
+    def __init__(self, dummy_label=10):
         self.real_labels = []
         self.predicted_labels = []
+
+        self.dummy_label = dummy_label
 
     def describe_batch_spikes(self, output_spikes):
         # output_spikes - batch, output_channel, neuro, time
@@ -95,12 +97,9 @@ class SpikesTracer:
         return result
 
     def get_predict(self, output_spikes):
-        # output_spikes - batch, output_channel, neuro, time
-        y_preds = output_spikes.sum((-2, -1))  # batch, output_channel
-
-        # y_pred = channel + 1 if no spike else argmax spike (?)
-        only_one_spikes = y_preds.sum(1) == 1
-        y_preds = y_preds.argmax(-1) + only_one_spikes
+        y_spikes = output_spikes.sum((-2, -1))  # batch, output_channel
+        y_preds = y_spikes.argmax(-1)  # select argmax as label
+        y_preds[y_spikes.sum(1) == 0] = self.dummy_label
 
         y_preds = y_preds.cpu().numpy()
 
