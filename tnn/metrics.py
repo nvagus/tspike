@@ -127,7 +127,7 @@ class SpikesTracer:
 
         return accuracy, percision, recall, matrix
 
-    def clear():
+    def clear(self):
         self.real_labels = []
         self.predicted_labels = []
 
