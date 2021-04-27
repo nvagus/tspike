@@ -22,7 +22,7 @@ class Interrupter:
 @click.command()
 @click.option('-g', '--gpu', default=0)
 @click.option('-e', '--epochs', default=1)
-@click.option('-i', '--bias', default=0.5)  # new
+@click.option('-i', '--bias', default=0.5)
 @click.option('-k', '--decay', default=0.99)
 @click.option('-b', '--batch', default=32)
 @click.option('-x', '--x-max', default=34)
@@ -31,10 +31,10 @@ class Interrupter:
 @click.option('-r', '--winners', default=1)
 @click.option('-n', '--neurons', default=1)
 @click.option('-f', '--forced-dep', default=0)
-@click.option('-d', '--dense', default=0.1)  # new
+@click.option('-d', '--dense', default=0.1)
 @click.option('-s', '--step', default=16)
 @click.option('-l', '--leak', default=32)
-@click.option('-w', '--w-init', default=0.5)
+@click.option('-w', '--w-init', default=0.3)
 @click.option('--capture', default=0.20)
 @click.option('--backoff', default=-0.20)
 @click.option('--search', default=0.01)
