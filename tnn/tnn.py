@@ -537,13 +537,33 @@ class FullDualColumn(nn.Module):
             potentials.sum() / self.response_function.kernel_size, self.weight)
         search_grad = search_grad * (capture_grad == 0).int()
 
+
         weight_update = (
-            capture_grad * mu_capture * (1 - self.weight) +
-            backoff_grad * mu_backoff * self.weight +
+            capture_grad * mu_capture * (1 -  torch.tanh(self.weight)) + 
+            backoff_grad * mu_backoff +
             search_grad * mu_search * (1 - self.weight) ** 2
         ) / (
             batch * neurons
         )
+
+        # weight_update = (
+        #     capture_grad * mu_capture * (1 - self.weight) +
+        #     backoff_grad * mu_backoff * self.weight +
+        #     search_grad * mu_search * (1 - self.weight) ** 2
+        # ) / (
+        #     batch * neurons
+        # )
+
+        # weight_update = (
+        #     capture_grad * mu_capture +
+        #     backoff_grad * mu_backoff +
+        #     search_grad * mu_search
+        # ) * (
+        #     (self.weight * (1 - self.weight) * 3 + 0.25)
+        # ) / (
+        #     batch * neurons
+        # )
+
 
         bias_update = 1 - has_spikes + beta_decay * has_spikes
 
