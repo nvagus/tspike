@@ -5,7 +5,7 @@ from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm
 
 from dataset import NMnistSampled
-from tnn import AutoMatchingMatrix, FullDualColumn
+from tnn import AutoMatchingMatrix, FullDualColumn, SpikesTracer
 from sklearn.metrics import accuracy_score
 
 
@@ -79,7 +79,10 @@ def main(
 
         return s
 
+
     for epoch in range(epochs):
+
+
         model.train(mode=True)
         print(f"epoch: {epoch}")
         train_data_iterator = tqdm(train_data_loader)
@@ -99,37 +102,18 @@ def main(
                     f'{descriptor()}; {output_spikes.sum()}, {accurate}')
 
         model.train(mode=False)
-        auto_matcher = AutoMatchingMatrix(10, 10)
-
-        real_labels = []
-        predicted_labels = []
+        
+        spikes_tracer = SpikesTracer()
         with Interrupter():
             for data, label in tqdm(test_data_loader):
                 input_spikes = data.reshape(-1, 2, x_max * y_max, t_max)
                 output_spikes = model.forward(input_spikes)
 
                 has_spikes = output_spikes.sum((-3, -2, -1)) > 0
-                y_preds = output_spikes.sum((-2, -1)).argmax(-1)
-
-                for has_spike, y_pred, y_true in zip(has_spikes.cpu().numpy(), y_preds.cpu().numpy(), label.numpy()):
-                    if has_spike:
-                        auto_matcher.add_sample(y_true, y_pred)
-
-                    predicted_labels.append(y_pred)
-                    real_labels.append(y_true)
-
-        with Interrupter():
-            print(auto_matcher.mat)
-            if np.all(np.sum(auto_matcher.mat, axis=0)) and np.all(np.sum(auto_matcher.mat, axis=1)):
-                accuracy, precision, recall = auto_matcher.describe()
-                print(accuracy, precision, recall)
-            else:
-                accuracy, precision, recall = -1, -1, -1
-
-            accuracy = accuracy_score(real_labels, predicted_labels)
-            torch.save(model.state_dict(), model_path)
-
-            print(accuracy, precision, recall)
+                y_preds = spikes_tracer.get_predict(output_spikes)
+                spikes_tracer.add_sample(label.numpy(), y_preds)
+                
+        spikes_tracer.describe_print_clear()
 
     return 0
 
