@@ -32,30 +32,37 @@ def eval_callback(ctx, param, value):
 @click.option('-y', '--y-max', default=34)
 @click.option('-t', '--t-max', default=256)
 @click.option('-f', '--forced-dep', default=0)
-# explore 0.1 < [0] < 0.3, 0.0069 < [1] < 0.02
 @click.option('-d', '--dense', default='[0.3,0.01]', callback=eval_callback)
 @click.option('-w', '--w-init', default=0.3)
 @click.option('-s', '--step', default=4)
 @click.option('-l', '--leak', default=8)
 @click.option('-c', '--channel', default='[16,32]', callback=eval_callback)
 @click.option('-p', '--pooling-kernel', default=4)
+@click.option('--winners', default=0.5)
 @click.option('--capture', default=0.2000)
 @click.option('--backoff', default=-0.3000)
 @click.option('--search', default=0.0005)
-@click.option('--fc_step', default=16)
-@click.option('--fc_leak', default=32)
-@click.option('--fc_dense', default=0.15)  # explore 0 < fc_dense < 0.032
+@click.option('--fc-capture', default=0.200)
+@click.option('--fc-backoff', default=-0.200)
+@click.option('--fc-search', default=0.001)
+@click.option('--fc-neuron', default=1)
+@click.option('--fc-winners', default=1)
+@click.option('--fc-step', default=16)
+@click.option('--fc-leak', default=32)
+@click.option('--fc-dense', default=0.10)
 @click.option('-r', '--depth-start', default=-1)
-@click.option('--forced_dep', default=0)
+@click.option('--forced-dep', default=0)
 @click.option('--train-path', default='data/n-mnist/TrainSP')
 @click.option('--test-path', default='data/n-mnist/TestSP')
 @click.option('--model-path', default='model/n-mnist-cv-stack')
 def main(
     gpu, batch, epochs,
     x_max, y_max, t_max,
-    step, leak,
+    step, leak, winners,
     forced_dep, dense, w_init, channel, pooling_kernel,
     capture, backoff, search,
+    fc_capture, fc_backoff, fc_search,
+    fc_neuron, fc_winners,
     fc_step, fc_leak, fc_dense,
     depth_start, train_path, test_path, model_path,
     **kwargs
@@ -81,7 +88,8 @@ def main(
 
     model = StackCV(
         channels=[2] + channel,
-        step=step, leak=leak, pooling_kernel=pooling_kernel,
+        step=step, leak=leak, bias=0.5, winners=winners,
+        pooling_kernel=pooling_kernel,
         fodep=forced_dep, w_init=w_init, dense=dense
     ).to(device)
 
@@ -134,9 +142,9 @@ def main(
     batch, channel, synapses_x, synapses_y, time = output_spikes.shape
     print(output_spikes.shape)
     fc_fodep = time + fc_step + fc_leak
-    tester = FullDualColumn(synapses_x * synapses_y, 1,
+    tester = FullDualColumn(synapses_x * synapses_y, fc_neuron,
                             input_channel=channel, output_channel=10,
-                            step=fc_step, leak=fc_leak,
+                            step=fc_step, leak=fc_leak, winners=fc_winners,
                             fodep=fc_fodep, w_init=0.5, dense=fc_dense
                             ).to(device)
 
@@ -149,16 +157,13 @@ def main(
                 output_spikes = model.forward(data)
                 output_spikes = output_spikes.reshape(
                     -1, channel, synapses_x * synapses_y, time)
-
                 output_spikes = tester.forward(
-                    output_spikes, labels=label.to(device))
-
-                has_spikes = output_spikes.sum((-3, -2, -1)) > 0
+                    output_spikes, labels=label.to(device),
+                    mu_capture=fc_capture, mu_backoff=fc_backoff, mu_search=fc_search)
+                
                 y_preds = output_spikes.sum((-2, -1)).argmax(-1)
-
                 accurate = (output_spikes.sum((-3, -2, -1)) > 0).logical_and(
                     output_spikes.sum((-2, -1)).argmax(-1) == label.to(device)).sum()
-
                 train_data_iterator.set_description(
                     f'{tester_descriptor()}; {output_spikes.sum()}, {accurate}')
 

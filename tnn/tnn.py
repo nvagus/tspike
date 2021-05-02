@@ -457,7 +457,7 @@ class FullDualColumn(nn.Module):
             f'bias={bias}'
         )
 
-    def forward(self, input_spikes, labels=None, mu_capture=0.2000, mu_backoff=-0.2000, mu_search=0.0001, beta_decay=0.9):
+    def forward(self, input_spikes, labels=None, mu_capture=0.20, mu_backoff=-0.20, mu_search=0.001, beta_decay=0.9):
         potentials = self.get_potentials(input_spikes, labels)
         output_spikes = self.winner_takes_all(potentials)
 
@@ -507,9 +507,6 @@ class FullDualColumn(nn.Module):
         potentials = potentials.permute(3, 0, 2, 1)
 
         # time to step out of depression, with initial 0 and constrains >= 0
-        # depression = torch.zeros(
-        #     batch, neurons, channel, dtype=torch.int32, device=potentials.device)
-
         depression = torch.zeros(
             batch, neurons, dtype=torch.int32, device=potentials.device)
         # return winners of the same shape as potentials
