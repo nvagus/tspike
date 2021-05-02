@@ -7,7 +7,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix
 from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm
 from dataset import NMnistSampled
-from tnn import ConvColumn, StackCV, FullColumn
+from tnn import ConvColumn, StackCV, SpikesTracer, FullDualColumn
 
 
 class Interrupter:
@@ -47,6 +47,9 @@ def eval_callback(ctx, param, value):
 @click.option('--fc_dense', default=0.15)  # explore 0 < fc_dense < 0.032
 @click.option('-r', '--depth-start', default=-1)
 @click.option('--forced_dep', default=0)
+@click.option('--train-path', default='data/n-mnist/TrainSP')
+@click.option('--test-path', default='data/n-mnist/TestSP')
+@click.option('--model-path', default='model/n-mnist-cv-stack')
 def main(
     gpu, batch, epochs,
     x_max, y_max, t_max,
@@ -124,22 +127,18 @@ def main(
             depth_i_model_path = os.path.join(model_path, str(depth))
             torch.save(model.state_dict(), depth_i_model_path)
 
-    if depth_start == model.num_spikes:
-        input_spikes = next(iter(train_data_loader))
-        output_spikes = model.forward(
-            input_spikes, mu_capture=capture, mu_backoff=backoff, mu_search=search)
-
+    spikes_tracer = SpikesTracer()
     model.train(mode=False)
 
     # build tester
     batch, channel, synapses_x, synapses_y, time = output_spikes.shape
     print(output_spikes.shape)
     fc_fodep = time + fc_step + fc_leak
-    tester = FullColumn(synapses_x * synapses_y, 1,
-                        input_channel=channel, output_channel=10,
-                        step=fc_step, leak=fc_leak,
-                        fodep=fc_fodep, w_init=0.5, dense=fc_dense
-                        ).to(device)
+    tester = FullDualColumn(synapses_x * synapses_y, 1,
+                            input_channel=channel, output_channel=10,
+                            step=fc_step, leak=fc_leak,
+                            fodep=fc_fodep, w_init=0.5, dense=fc_dense
+                            ).to(device)
 
     for epoch in range(epochs):
         print(f"tester epoch: {epoch}")
@@ -168,8 +167,6 @@ def main(
         tester_model_path = os.path.join(model_path, "fc")
         torch.save(model.state_dict(), tester_model_path)
 
-        real_labels = []
-        predicted_labels = []
         with Interrupter():
             for data, label in tqdm(test_data_loader):
                 output_spikes = model.forward(data)
@@ -179,17 +176,10 @@ def main(
                 output_spikes = tester.forward(
                     output_spikes, labels=label.to(device))
 
-                predicted_label = output_spikes.sum(
-                    (-2, -1)).argmax(-1).cpu().numpy()
-                predicted_labels.append(predicted_label)
+                y_preds = spikes_tracer.get_predict(output_spikes)
+                spikes_tracer.add_sample(label.numpy(), y_preds)
 
-                real_labels.append(label.numpy())
-
-        real_labels = np.hstack(real_labels)
-        predicted_labels = np.hstack(predicted_labels)
-
-        print('accuracy: ', accuracy_score(real_labels, predicted_labels))
-        print(confusion_matrix(real_labels, predicted_labels))
+        spikes_tracer.describe_print_clear()
 
     return 0
 
