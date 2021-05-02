@@ -495,23 +495,18 @@ class FullDualColumn(nn.Module):
         for t in range(time):
             # apply depression state to the potential
             depress_t = (depression.unsqueeze(-1) == 0).int()
-            k_depress_t = ((depression != 0).sum(-1) < self.winners).int().reshape(-1, 1, 1)
-            potential_t = potentials[t] * depress_t * k_depress_t
+            k_depress_t = ((depression != 0).sum(-1) <
+                           self.winners).int().reshape(-1, 1, 1)
+            potential_t = (potentials[t] * depress_t *
+                           k_depress_t).reshape(batch, -1)
             # find channel and neuron winners
-            # c_winner@t: winner index of the channel
-            # p_winner@t: the potential of the channel winner
-            # n_winner@t: the max potential for each neuron
-            # spike@t: channel winner && neuron winner && over threshold
-            c_winner_t = potential_t.argmax(-1).unsqueeze(-1)
-            p_winner_t = potential_t.gather(-1, c_winner_t) # 
-            n_winner_t = p_winner_t.argmax(-2).unsqueeze(-1)
-
-            spike_t = (p_winner_t > self.theta).int().scatter_add(-2, n_winner_t, torch.ones_like(n_winner_t, dtype=torch.int32))
-            spike_t = (spike_t == 2).int()
+            cn_winner_t = potential_t.argmax(-1).unsqueeze(-1)
+            p_winner_t = potential_t.gather(-1, cn_winner_t)
+            spike_t = (p_winner_t > self.theta).int()
 
             # set winner@t
-            # should be sum(winners[t]) == 1
-            winners[t].scatter_(-1, c_winner_t, spike_t)
+            winners[t] = winners[t].reshape(
+                batch, -1).scatter(-1, cn_winner_t, spike_t).reshape(batch, neurons, -1)
             # update depression
             depression += winners[t].sum(-1) * self.fodep
             depression = (depression - 1).clip(0, self.fodep - 1)
@@ -537,16 +532,16 @@ class FullDualColumn(nn.Module):
             potentials.sum() / self.response_function.kernel_size, self.weight)
         search_grad = search_grad * (capture_grad == 0).int()
 
-
         weight_update = (
-            capture_grad * mu_capture * (1 -  torch.tanh(self.weight)) + 
+            capture_grad * mu_capture * (1 - torch.tanh(self.weight)) +
             backoff_grad * mu_backoff +
-            search_grad * mu_search * self.bias.unsqueeze(-1) #  * (1 - self.weight) ** 2
+            # * (1 - self.weight) ** 2
+            search_grad * mu_search * self.bias.unsqueeze(-1)
         ) / (
             batch * neurons
         )
 
-        # search add bias 
+        # search add bias
 
         # weight_update = (
         #     capture_grad * mu_capture * (1 - self.weight) +
@@ -565,7 +560,6 @@ class FullDualColumn(nn.Module):
         # ) / (
         #     batch * neurons
         # )
-
 
         bias_update = 1 - has_spikes + beta_decay * has_spikes
 
