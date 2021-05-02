@@ -541,7 +541,7 @@ class FullDualColumn(nn.Module):
         weight_update = (
             capture_grad * mu_capture * (1 -  torch.tanh(self.weight)) + 
             backoff_grad * mu_backoff +
-            search_grad * mu_search * self.bias.unsqueeze(-1) # * (1 - self.weight) ** 2
+            search_grad * mu_search * self.bias.unsqueeze(-1) #  * (1 - self.weight) ** 2
         ) / (
             batch * neurons
         )

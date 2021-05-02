@@ -81,8 +81,6 @@ def main(
 
 
     for epoch in range(epochs):
-
-
         model.train(mode=True)
         print(f"epoch: {epoch}")
         train_data_iterator = tqdm(train_data_loader)
@@ -102,6 +100,7 @@ def main(
                     f'{descriptor()}; {output_spikes.sum()}, {accurate}')
 
         model.train(mode=False)
+        torch.save(model.state_dict(), model_path)
         
         spikes_tracer = SpikesTracer()
         with Interrupter():
@@ -112,7 +111,7 @@ def main(
                 has_spikes = output_spikes.sum((-3, -2, -1)) > 0
                 y_preds = spikes_tracer.get_predict(output_spikes)
                 spikes_tracer.add_sample(label.numpy(), y_preds)
-                
+
         spikes_tracer.describe_print_clear()
 
     return 0
