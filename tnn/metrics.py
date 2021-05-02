@@ -1,7 +1,7 @@
+import torch
 import numpy as np
 from hungarian_algorithm import algorithm
-from sklearn.metrics import accuracy_score, confusion_matrix
-
+from sklearn.metrics import accuracy_score, confusion_matrix, precision_score, recall_score
 
 class AutoMatchingMatrix:
     def __init__(self, n_labels, n_outputs=None):

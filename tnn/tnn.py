@@ -482,8 +482,11 @@ class FullDualColumn(nn.Module):
         potentials = potentials.permute(3, 0, 2, 1)
 
         # time to step out of depression, with initial 0 and constrains >= 0
+        # depression = torch.zeros(
+        #     batch, neurons, channel, dtype=torch.int32, device=potentials.device)
+
         depression = torch.zeros(
-            batch, neurons, channel, dtype=torch.int32, device=potentials.device)
+            batch, neurons, dtype=torch.int32, device=potentials.device)
         # return winners of the same shape as potentials
         winners = torch.zeros(time, batch, neurons, channel,
                               dtype=torch.int32, device=potentials.device)
@@ -491,9 +494,8 @@ class FullDualColumn(nn.Module):
         # iterate time axis: get the winner for each batch, channel of neurons, update winners and depression
         for t in range(time):
             # apply depression state to the potential
-            depress_t = (depression == 0).int()
-            k_depress_t = ((depression != 0).sum(-1, keepdim=True)
-                           < self.winners).int()
+            depress_t = (depression.unsqueeze(-1) == 0).int()
+            k_depress_t = ((depression != 0).sum(-1) < self.winners).int().reshape(-1, 1, 1)
             potential_t = potentials[t] * depress_t * k_depress_t
             # find channel and neuron winners
             # c_winner@t: winner index of the channel
@@ -501,14 +503,17 @@ class FullDualColumn(nn.Module):
             # n_winner@t: the max potential for each neuron
             # spike@t: channel winner && neuron winner && over threshold
             c_winner_t = potential_t.argmax(-1).unsqueeze(-1)
-            p_winner_t = potential_t.gather(-1, c_winner_t)
-            # n_winner_t = potential_t.max(-2, keepdim=True)[0]
+            p_winner_t = potential_t.gather(-1, c_winner_t) # 
+            n_winner_t = p_winner_t.argmax(-2).unsqueeze(-1)
 
-            spike_t = (p_winner_t > self.theta).int()
+            spike_t = (p_winner_t > self.theta).int().scatter_add(-2, n_winner_t, torch.ones_like(n_winner_t, dtype=torch.int32))
+            spike_t = (spike_t == 2).int()
+
             # set winner@t
+            # should be sum(winners[t]) == 1
             winners[t].scatter_(-1, c_winner_t, spike_t)
             # update depression
-            depression += winners[t].sum(-1).unsqueeze(-1) * self.fodep
+            depression += winners[t].sum(-1) * self.fodep
             depression = (depression - 1).clip(0, self.fodep - 1)
 
         return winners.permute(1, 3, 2, 0).float()
@@ -532,13 +537,35 @@ class FullDualColumn(nn.Module):
             potentials.sum() / self.response_function.kernel_size, self.weight)
         search_grad = search_grad * (capture_grad == 0).int()
 
+
         weight_update = (
-            capture_grad * mu_capture * (1 - self.weight) +
-            backoff_grad * mu_backoff * self.weight +
-            search_grad * mu_search * (1 - self.weight) ** 2
+            capture_grad * mu_capture * (1 -  torch.tanh(self.weight)) + 
+            backoff_grad * mu_backoff +
+            search_grad * mu_search * self.bias.unsqueeze(-1) #  * (1 - self.weight) ** 2
         ) / (
             batch * neurons
         )
+
+        # search add bias 
+
+        # weight_update = (
+        #     capture_grad * mu_capture * (1 - self.weight) +
+        #     backoff_grad * mu_backoff * self.weight +
+        #     search_grad * mu_search * (1 - self.weight) ** 2
+        # ) / (
+        #     batch * neurons
+        # )
+
+        # weight_update = (
+        #     capture_grad * mu_capture +
+        #     backoff_grad * mu_backoff +
+        #     search_grad * mu_search
+        # ) * (
+        #     (self.weight * (1 - self.weight) * 3 + 0.25)
+        # ) / (
+        #     batch * neurons
+        # )
+
 
         bias_update = 1 - has_spikes + beta_decay * has_spikes
 
