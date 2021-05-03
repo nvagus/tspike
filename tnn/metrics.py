@@ -3,6 +3,7 @@ import numpy as np
 from hungarian_algorithm import algorithm
 from sklearn.metrics import accuracy_score, confusion_matrix, precision_score, recall_score
 
+
 class AutoMatchingMatrix:
     def __init__(self, n_labels, n_outputs=None):
         self.n_labels = n_labels
@@ -114,9 +115,15 @@ class SpikesTracer:
         self.predicted_labels += list(output)
 
     def evaluate(self, clean_state=False):
+        self.real_labels = np.array(self.real_labels)
+        self.predicted_labels = np.array(self.predicted_labels)
+
         accuracy = accuracy_score(self.real_labels, self.predicted_labels)
+
+        percision_filter = self.predicted_labels != self.dummy_label
         percision = precision_score(
-            self.real_labels, self.predicted_labels, average='micro')
+            self.real_labels[percision_filter], self.predicted_labels[percision_filter], average='micro')
+
         recall = recall_score(
             self.real_labels, self.predicted_labels, average='micro')
 

@@ -27,7 +27,7 @@ class StackFullColumn(torch.nn.Module):
             w_init = [w_init] * self.num_spikes
         if not isinstance(theta, Sequence):
             theta = [theta] * self.num_spikes
-        if not isinstance(fodep, Sequence):
+        if not isinstance(dense, Sequence):
             dense = [dense] * self.num_spikes
 
         self.kernel = kernel
@@ -60,7 +60,7 @@ class StackCV(torch.nn.Module):
     def __init__(
         self,
         channels, conv_kernel=3, pooling_kernel=2,
-        step=16, leak=32,
+        step=16, leak=32, bias=0.5, winners=0.5,
         fodep=None, w_init=0., theta=None, dense=None
     ):
         super(StackCV, self).__init__()
@@ -70,13 +70,17 @@ class StackCV(torch.nn.Module):
             step = [step] * self.num_spikes
         if not isinstance(leak, Sequence):
             leak = [leak] * self.num_spikes
+        if not isinstance(bias, Sequence):
+            bias = [bias] * self.num_spikes
+        if not isinstance(winners, Sequence):
+            winners = [winners] * self.num_spikes
         if not isinstance(fodep, Sequence):
             fodep = [fodep] * self.num_spikes
         if not isinstance(w_init, Sequence):
             w_init = [w_init] * self.num_spikes
         if not isinstance(theta, Sequence):
             theta = [theta] * self.num_spikes
-        if not isinstance(fodep, Sequence):
+        if not isinstance(dense, Sequence):
             dense = [dense] * self.num_spikes
 
         self.conv_kernel = conv_kernel
@@ -88,7 +92,7 @@ class StackCV(torch.nn.Module):
             column = ConvColumn(
                 channels[i], channels[i+1],
                 kernel=conv_kernel, stride=2,
-                step=step[i], leak=leak[i],
+                step=step[i], leak=leak[i], bias=bias[i], winners=winners[i],
                 fodep=fodep[i], w_init=w_init[i], theta=theta[i], dense=dense[i]
             )
             self.columns.append(column)
