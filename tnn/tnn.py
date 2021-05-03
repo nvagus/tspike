@@ -39,13 +39,14 @@ class StepFireLeak(nn.Module):
 class TNNColumn(nn.Module):
     def __init__(self):
         super(TNNColumn, self).__init__()
-    
+
     @staticmethod
     def _describe_weight(weight):
         # param weight: [pattern_0, pattern_1, ..., pattern_k]
         # othogonal
         w_norm = weight / (weight ** 2).sum(1, keepdim=True).sqrt()
-        othogonal = (((w_norm @ w_norm.T) ** 2).mean() - 1 / weight.shape[0]).sqrt()
+        othogonal = (((w_norm @ w_norm.T) ** 2).mean() -
+                     1 / weight.shape[0]).sqrt()
         # distribution
         w_mean = weight.mean(-1)
         w_min = w_mean.min()
@@ -55,7 +56,7 @@ class TNNColumn(nn.Module):
             f'othogonal: {othogonal * 100:.2f}',
             f'pattern: {w_min * 100:.2f}-{w_avg * 100:.2f}-{w_max * 100:.2f}'
         )
-    
+
     @staticmethod
     def _describe_bias(bias):
         # bias: [neuron_0, neuron_1, ..., neuron_k]
@@ -72,7 +73,7 @@ class TNNColumn(nn.Module):
 
     def describe_bias(self):
         raise NotImplementedError()
-    
+
     def describe(self):
         return f'weight<{self.describe_weight()}>; bias<{self.describe_bias()}>'
 
@@ -500,7 +501,7 @@ class FullDualColumn(nn.Module):
             f'bias={bias}'
         )
 
-    def forward(self, input_spikes, labels=None, mu_capture=0.20, mu_backoff=-0.20, mu_search=0.001, beta_decay=0.9):
+    def forward(self, input_spikes, labels=None, mu_capture=0.20, mu_backoff=-0.20, mu_search=0.001, beta_decay=0.999):
         potentials, supervision = self.get_potentials(input_spikes, labels)
         output_spikes = self.winner_takes_all(potentials)
         if supervision is not None:

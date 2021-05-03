@@ -50,6 +50,7 @@ def eval_callback(ctx, param, value):
 @click.option('--fc-step', default=16)
 @click.option('--fc-leak', default=32)
 @click.option('--fc-dense', default=0.10)
+@click.option('--fc-w-init', default=0.3)
 @click.option('-r', '--depth-start', default=-1)
 @click.option('--train-path', default='data/n-mnist/TrainSP')
 @click.option('--test-path', default='data/n-mnist/TestSP')
@@ -62,7 +63,7 @@ def main(
     capture, backoff, search,
     fc_capture, fc_backoff, fc_search,
     fc_neuron, fc_winners,
-    fc_step, fc_leak, fc_dense,
+    fc_step, fc_leak, fc_dense, fc_w_init,
     depth_start, train_path, test_path, model_path,
     **kwargs
 ):
@@ -96,7 +97,11 @@ def main(
         return ','.join('{:.0f}'.format(x) for x in model.columns[depth].weight.sum((1, 2, 3)).detach())
 
     def tester_descriptor():
-        return ','.join('{:.0f}'.format(x) for x in tester.weight.sum(1))
+        max_print = 10
+        s = f"{','.join(f'{x*100:.0f}' for x in tester.weight.mean(axis=1)[:max_print])}; "
+        s += f"{','.join(f'{x*100:.0f}' for x in tester.bias[:max_print])}; "
+
+        return s
 
     def othogonal(depth):
         weight = model.columns[depth].weight
@@ -106,9 +111,19 @@ def main(
         return (((w @ w.T) ** 2).mean() - 1 / oc).sqrt()
 
     if depth_start != -1:
-        depth_i_model_path = os.path.join(model_path, str(depth_start))
-        model.load_state_dict(torch.load(cv_stack_model_path))
-        print("Finished loading ", cv_stack_model_path)
+        print("Starting from ", depth_start)
+        depth_i_model_path = os.path.join(model_path, str(depth_start - 1))
+        model.load_state_dict(torch.load(depth_i_model_path))
+        print("Finished loading ", depth_i_model_path)
+
+        # just to get the shape of output_spikes
+        model.eval()
+        for data, label in train_data_loader:
+            input_spikes = data
+            output_spikes = model.forward(
+                input_spikes, depth_start - 1, mu_capture=capture, mu_backoff=backoff, mu_search=search)
+            break
+
     else:
         depth_start = 0
         print("Fresh train from 0")
@@ -132,6 +147,7 @@ def main(
                         f'time coverage:{(output_spikes.sum((1, 2, 3)) > 0).float().mean() * 100:.2f}')
 
             depth_i_model_path = os.path.join(model_path, str(depth))
+            print("saving", depth_i_model_path)
             torch.save(model.state_dict(), depth_i_model_path)
 
     spikes_tracer = SpikesTracer()
@@ -139,12 +155,11 @@ def main(
 
     # build tester
     batch, channel, synapses_x, synapses_y, time = output_spikes.shape
-    print(output_spikes.shape)
     fc_fodep = time + fc_step + fc_leak
     tester = FullDualColumn(synapses_x * synapses_y, fc_neuron,
                             input_channel=channel, output_channel=10,
                             step=fc_step, leak=fc_leak, winners=fc_winners,
-                            fodep=fc_fodep, w_init=0.5, dense=fc_dense
+                            fodep=fc_fodep, w_init=fc_w_init, dense=fc_dense
                             ).to(device)
 
     for epoch in range(epochs):
