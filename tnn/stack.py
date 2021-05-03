@@ -27,7 +27,7 @@ class StackFullColumn(torch.nn.Module):
             w_init = [w_init] * self.num_spikes
         if not isinstance(theta, Sequence):
             theta = [theta] * self.num_spikes
-        if not isinstance(fodep, Sequence):
+        if not isinstance(dense, Sequence):
             dense = [dense] * self.num_spikes
 
         self.kernel = kernel
@@ -80,7 +80,7 @@ class StackCV(torch.nn.Module):
             w_init = [w_init] * self.num_spikes
         if not isinstance(theta, Sequence):
             theta = [theta] * self.num_spikes
-        if not isinstance(fodep, Sequence):
+        if not isinstance(dense, Sequence):
             dense = [dense] * self.num_spikes
 
         self.conv_kernel = conv_kernel

@@ -189,7 +189,8 @@ class ConvColumn(nn.Module):
         self.winners = winners
 
         # initialize weight and bias
-        self.bias = nn.parameter.Parameter(torch.zeros(self.output_channel) + bias, requires_grad=False)
+        self.bias = nn.parameter.Parameter(torch.zeros(
+            self.output_channel) + bias, requires_grad=False)
         self.weight = nn.parameter.Parameter(
             Exponential(1 / w_init).sample((self.output_channel,
                                             self.input_channel, self.kernel, self.kernel)).clip(0, 1),
@@ -236,27 +237,28 @@ class ConvColumn(nn.Module):
         # return winners of the same shape as potentials
         winners = torch.zeros(time, batch, neuron_x * neuron_y,
                               channel, dtype=torch.int32, device=potentials.device)
-        winner_fodep = np.ceil(self.winner * neuron_x * neuron_y)
+        winner_fodep = np.ceil(self.winners * neuron_x * neuron_y)
         for t in range(time):
             depress_t = (depression == 0).unsqueeze(-1).int()
-            k_depress_t = ((depression != 0).sum(-1) < winner_fodep).int().reshape(-1, 1, 1)
+            k_depress_t = ((depression != 0).sum(-1) <
+                           winner_fodep).int().reshape(-1, 1, 1)
             potential_t = potentials[t] * depress_t * k_depress_t
             winner_t = potential_t.argmax(-1).unsqueeze(-1)
             spike_t = (potential_t.gather(-1, winner_t) > self.theta).int()
             winners[t].scatter_(-1, winner_t, spike_t)
             depression += winners[t].sum(-1) * self.fodep
             depression = (depression - 1).clip(0, self.fodep - 1)
-        
+
         return winners.permute(1, 3, 2, 0).reshape(batch, channel, neuron_x, neuron_y, time).float()
 
     def stdp(
-        self, 
-        potentials, output_spikes, 
+        self,
+        potentials, output_spikes,
         mu_capture, mu_backoff, mu_search, beta_decay
     ):
         batch, _channel, neuron_x, neuron_y, _time = output_spikes.shape
         total_spike = output_spikes.sum((0, 2, 3, 4)).reshape(-1, 1, 1, 1)
-        has_spikes = (total_spike > 0).int()
+        has_spikes = (total_spike > 0).int().reshape(-1)
 
         capture_grad, = torch.autograd.grad(
             (potentials * output_spikes).sum(), self.weight, retain_graph=True)
@@ -269,7 +271,7 @@ class ConvColumn(nn.Module):
         weight_update = (
             capture_grad * mu_capture * (1 - torch.tanh(self.weight)) +
             backoff_grad * mu_backoff +
-            search_grad * mu_search * self.bias.unsqueeze(-1)
+            search_grad * mu_search * self.bias.reshape(-1, 1, 1, 1)
         ) / (
             batch * neuron_x * neuron_y
         )

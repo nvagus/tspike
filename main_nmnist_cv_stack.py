@@ -40,7 +40,7 @@ def eval_callback(ctx, param, value):
 @click.option('-p', '--pooling-kernel', default=4)
 @click.option('--winners', default=0.5)
 @click.option('--capture', default=0.2000)
-@click.option('--backoff', default=-0.3000)
+@click.option('--backoff', default=-0.2000)
 @click.option('--search', default=0.0005)
 @click.option('--fc-capture', default=0.200)
 @click.option('--fc-backoff', default=-0.200)
@@ -51,7 +51,6 @@ def eval_callback(ctx, param, value):
 @click.option('--fc-leak', default=32)
 @click.option('--fc-dense', default=0.10)
 @click.option('-r', '--depth-start', default=-1)
-@click.option('--forced-dep', default=0)
 @click.option('--train-path', default='data/n-mnist/TrainSP')
 @click.option('--test-path', default='data/n-mnist/TestSP')
 @click.option('--model-path', default='model/n-mnist-cv-stack')
@@ -160,7 +159,7 @@ def main(
                 output_spikes = tester.forward(
                     output_spikes, labels=label.to(device),
                     mu_capture=fc_capture, mu_backoff=fc_backoff, mu_search=fc_search)
-                
+
                 y_preds = output_spikes.sum((-2, -1)).argmax(-1)
                 accurate = (output_spikes.sum((-3, -2, -1)) > 0).logical_and(
                     output_spikes.sum((-2, -1)).argmax(-1) == label.to(device)).sum()
