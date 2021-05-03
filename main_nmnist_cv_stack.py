@@ -50,7 +50,9 @@ def eval_callback(ctx, param, value):
 @click.option('--fc-step', default=16)
 @click.option('--fc-leak', default=32)
 @click.option('--fc-dense', default=0.10)
+@click.option('--fc-theta', default=0.10)
 @click.option('--fc-w-init', default=0.3)
+@click.option('--fc-bias', default=0.5)
 @click.option('-r', '--depth-start', default=-1)
 @click.option('--train-path', default='data/n-mnist/TrainSP')
 @click.option('--test-path', default='data/n-mnist/TestSP')
@@ -63,7 +65,7 @@ def main(
     capture, backoff, search,
     fc_capture, fc_backoff, fc_search,
     fc_neuron, fc_winners,
-    fc_step, fc_leak, fc_dense, fc_w_init,
+    fc_step, fc_leak, fc_dense, fc_theta, fc_w_init, fc_bias,
     depth_start, train_path, test_path, model_path,
     **kwargs
 ):
@@ -150,7 +152,6 @@ def main(
             print("saving", depth_i_model_path)
             torch.save(model.state_dict(), depth_i_model_path)
 
-    spikes_tracer = SpikesTracer()
     model.train(mode=False)
 
     # build tester
@@ -159,7 +160,8 @@ def main(
     tester = FullDualColumn(synapses_x * synapses_y, fc_neuron,
                             input_channel=channel, output_channel=10,
                             step=fc_step, leak=fc_leak, winners=fc_winners,
-                            fodep=fc_fodep, w_init=fc_w_init, dense=fc_dense
+                            fodep=fc_fodep, w_init=fc_w_init, dense=fc_dense,
+                            theta=fc_theta, bias=fc_bias,
                             ).to(device)
 
     for epoch in range(epochs):
@@ -186,6 +188,7 @@ def main(
         tester_model_path = os.path.join(model_path, "fc")
         torch.save(model.state_dict(), tester_model_path)
 
+        spikes_tracer = SpikesTracer()
         with Interrupter():
             for data, label in tqdm(test_data_loader):
                 output_spikes = model.forward(data)
