@@ -36,6 +36,47 @@ class StepFireLeak(nn.Module):
         return StepFireLeakKernel.apply(weight, self.step, self.leak)
 
 
+class TNNColumn(nn.Module):
+    def __init__(self):
+        super(TNNColumn, self).__init__()
+    
+    @staticmethod
+    def _describe_weight(weight):
+        # param weight: [pattern_0, pattern_1, ..., pattern_k]
+        # othogonal
+        w_norm = weight / (weight ** 2).sum(1, keepdim=True).sqrt()
+        othogonal = (((w_norm @ w_norm.T) ** 2).mean() - 1 / weight.shape[0]).sqrt()
+        # distribution
+        w_mean = weight.mean(-1)
+        w_min = w_mean.min()
+        w_max = w_mean.max()
+        w_avg = w_mean.mean()
+        return ', '.join(
+            f'othogonal: {othogonal * 100:.2f}',
+            f'pattern: {w_min * 100:.2f}-{w_avg * 100:.2f}-{w_max * 100:.2f}'
+        )
+    
+    @staticmethod
+    def _describe_bias(bias):
+        # bias: [neuron_0, neuron_1, ..., neuron_k]
+        b_mean = bias.mean(-1)
+        b_min = b_mean.min()
+        b_max = b_mean.max()
+        b_avg = b_mean.mean()
+        return ', '.join(
+            f'pattern: {b_min * 100:.2f}-{b_avg * 100:.2f}-{b_max * 100:.2f}'
+        )
+
+    def describe_weight(self):
+        raise NotImplementedError()
+
+    def describe_bias(self):
+        raise NotImplementedError()
+    
+    def describe(self):
+        return f'weight<{self.describe_weight()}>; bias<{self.describe_bias()}>'
+
+
 class FullColumn(nn.Module):
     def __init__(
         self,
@@ -460,9 +501,10 @@ class FullDualColumn(nn.Module):
         )
 
     def forward(self, input_spikes, labels=None, mu_capture=0.20, mu_backoff=-0.20, mu_search=0.001, beta_decay=0.9):
-        potentials = self.get_potentials(input_spikes, labels)
+        potentials, supervision = self.get_potentials(input_spikes, labels)
         output_spikes = self.winner_takes_all(potentials)
-
+        if supervision is not None:
+            output_spikes = output_spikes * supervision.unsqueeze(-1)
         if self.training:
             self.stdp(
                 potentials, output_spikes,
@@ -485,22 +527,22 @@ class FullDualColumn(nn.Module):
             batch, self.output_channel, self.neurons, -1)
         # apply bias
         if labels is not None:
-
             # apply bias to labeled channels
             supervision = torch.zeros(batch, self.output_channel, dtype=torch.int32, device=labels.device).scatter(
-                1, labels.unsqueeze(-1), self.theta
-            )
-            # supervision (batch, channel) # output_channel?
+                1, labels.unsqueeze(-1), 1
+            ).unsqueeze(-1)
+            # supervision (batch, channel, 1)
             potentials = potentials + (
-                supervision.unsqueeze(-1) *
+                supervision * self.theta *
                 self.bias.reshape(1, self.output_channel, self.neurons)
             ).unsqueeze(-1)
+            return potentials, supervision
         else:
             # apply bias to all channels
             potentials = potentials + (
                 self.theta * self.bias
             ).reshape(1, self.output_channel, self.neurons, 1)
-        return potentials
+            return potentials, None
 
     def winner_takes_all(self, potentials):
         batch, channel, neurons, time = potentials.shape
