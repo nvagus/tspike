@@ -115,8 +115,11 @@ class SpikesTracer:
         self.predicted_labels += list(output)
 
     def evaluate(self, clean_state=False):
+        self.real_labels = np.array(self.real_labels)
+        self.predicted_labels = np.array(self.predicted_labels)
+
         accuracy = accuracy_score(self.real_labels, self.predicted_labels)
-        #
+
         percision_filter = self.predicted_labels != self.dummy_label
         percision = precision_score(
             self.real_labels[percision_filter], self.predicted_labels[percision_filter], average='micro')

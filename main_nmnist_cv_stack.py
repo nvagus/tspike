@@ -192,8 +192,7 @@ def main(
                 output_spikes = output_spikes.reshape(
                     -1, channel, synapses_x * synapses_y, time)
 
-                output_spikes = tester.forward(
-                    output_spikes, labels=label.to(device))
+                output_spikes = tester.forward(output_spikes)
 
                 y_preds = spikes_tracer.get_predict(output_spikes)
                 spikes_tracer.add_sample(label.numpy(), y_preds)
