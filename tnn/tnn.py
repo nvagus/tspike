@@ -54,19 +54,19 @@ class TNNColumn(nn.Module):
         w_min = w_mean.min()
         w_max = w_mean.max()
         w_avg = w_mean.mean()
-        return ', '.join(
+        return ', '.join([
             f'othogonal: {othogonal * 100:.2f}',
             f'pattern: {w_min * 100:.2f}-{w_avg * 100:.2f}-{w_max * 100:.2f}'
-        )
+        ])
 
     @staticmethod
     def _describe_bias(bias):
         b_min = bias.min()
         b_max = bias.max()
         b_avg = bias.mean()
-        return ', '.join(
+        return ', '.join([
             f'pattern: {b_min * 100:.2f}-{b_avg * 100:.2f}-{b_max * 100:.2f}'
-        )
+        ])
 
     def describe_weight(self):
         raise NotImplementedError()
@@ -217,12 +217,12 @@ class FullColumn(TNNColumn):
     ):
         batch, _channel, neurons, _time = output_spikes.shape
 
-        total_spikes = output_spikes.sum((0, 3)).reshape(-1, 1)
+        total_spikes = output_spikes.sum((0, 3))
 
         capture_grad, = torch.autograd.grad(
             (potentials * output_spikes).sum(), self.weight, retain_graph=True)
-        capture_grad = capture_grad.min(total_spikes)
-        backoff_grad = total_spikes - capture_grad
+        capture_grad = capture_grad.min(total_spikes.reshape(-1, 1))
+        backoff_grad = total_spikes.reshape(-1, 1) - capture_grad
         search_grad, = torch.autograd.grad(
             potentials.sum() / self.response_function.kernel_size, self.weight)
         search_grad = search_grad * (capture_grad == 0).int()
@@ -234,17 +234,18 @@ class FullColumn(TNNColumn):
         ) / (
             batch * neurons
         )
-        bias_update = beta_decay ** total_spikes
+
+        bias_update = beta_decay ** total_spikes.reshape(-1)
 
         with torch.no_grad():
             self.bias.mul_(bias_update)
             self.weight.add_(weight_update).clip_(0, 1)
 
     def describe_weight(self):
-        return self.describe_weight(self.weight.detach())
+        return self._describe_weight(self.weight.detach())
 
     def describe_bias(self):
-        return self.describe_bias(self.bias)
+        return self._describe_bias(self.bias)
 
 
 class ConvColumn(nn.Module):
