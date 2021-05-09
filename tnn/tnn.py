@@ -139,7 +139,8 @@ class FullColumn(TNNColumn):
     def get_potentials(self, input_spikes, labels=None):
         # coalesce input channel and synpases
         batch, channel, synapses, time = input_spikes.shape
-        dual_spikes = self.dual(input_spikes).reshape(batch, channel * synapses, time)
+        dual_spikes = self.dual(input_spikes).reshape(
+            batch, channel * synapses, time)
         input_spikes = input_spikes.reshape(batch, channel * synapses, time)
         # perform conv1d to compute potentials
         w_kernel = self.response_function.forward(self.weight)
@@ -156,10 +157,10 @@ class FullColumn(TNNColumn):
         # apply bias
         if labels is not None:
             # apply bias to labeled channels
-            supervision = torch.zeros(batch, self.output_channel, dtype=torch.int32, device=labels.device).scatter(
+            supervision = torch.zeros(batch, self.neurons, dtype=torch.int32, device=labels.device).scatter(
                 1, labels.unsqueeze(-1), 1
-            ).unsqueeze(-1)
-            # supervision (batch, channel, 1)
+            ).unsqueeze(-2)
+            # supervision (batch, 1, neurons)
             potentials = potentials + (
                 supervision * self.theta *
                 self.bias.reshape(1, self.output_channel, self.neurons)
@@ -194,6 +195,7 @@ class FullColumn(TNNColumn):
             potential_t = (potentials[t] * depress_t *
                            k_depress_t).reshape(batch, -1)
             # find channel and neuron winners
+
             cn_winner_t = potential_t.argmax(-1).unsqueeze(-1)
             p_winner_t = potential_t.gather(-1, cn_winner_t)
             spike_t = (p_winner_t > self.theta).int()
@@ -232,7 +234,6 @@ class FullColumn(TNNColumn):
         ) / (
             batch * neurons
         )
-
         bias_update = beta_decay ** total_spikes
 
         with torch.no_grad():
@@ -500,4 +501,3 @@ class RecurColumn(nn.Module):
 
         with torch.no_grad():
             self.weight.add_(update).clip_(0, 1)
-
