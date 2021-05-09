@@ -29,7 +29,7 @@ class Interrupter:
 # spiking control
 @click.option('--dense', default=0.04)
 @click.option('--theta', default=0)
-@click.option('--forced-dep', default=0)
+@click.option('--forced-dep', default=1024)
 @click.option('--w-init', default=0.30)
 @click.option('--bias', default=0.30)
 @click.option('--step', default=8)
@@ -38,9 +38,6 @@ class Interrupter:
 @click.option('--neurons', default=1)
 @click.option('--winners', default=1)
 # learning parameters
-@click.option('--capture', default=0.2000)
-@click.option('--backoff', default=-0.2000)
-@click.option('--search', default=0.0010)
 @click.option('--decay', default=0.9999)
 # paths
 @click.option('--train-path', default='data/n-mnist/TrainSP')
@@ -52,7 +49,7 @@ def main(
     dense, theta, forced_dep, w_init, bias,
     step, leak,
     neurons, winners,
-    capture, backoff, search, decay,
+    decay,
     train_path, test_path, model_path,
     **kwargs
 ):
@@ -81,8 +78,7 @@ def main(
             for data, label in train_data_iterator:
                 input_spikes = data.reshape(-1, 2, x_max * y_max, t_max)
                 output_spikes = model.forward(
-                    input_spikes, label.to(device),
-                    mu_capture=capture, mu_backoff=backoff, mu_search=search, beta_decay=decay)
+                    input_spikes, label.to(device), beta_decay=decay)
                 # output_spikes: bacth, channel, neuro, time
                 accurate = (output_spikes.sum((-3, -2, -1)) > 0).logical_and(
                     output_spikes.sum((-2, -1)).argmax(-1) == label.to(device)).sum()
