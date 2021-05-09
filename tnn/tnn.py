@@ -54,19 +54,19 @@ class TNNColumn(nn.Module):
         w_min = w_mean.min()
         w_max = w_mean.max()
         w_avg = w_mean.mean()
-        return ', '.join(
+        return ', '.join([
             f'othogonal: {othogonal * 100:.2f}',
             f'pattern: {w_min * 100:.2f}-{w_avg * 100:.2f}-{w_max * 100:.2f}'
-        )
+        ])
 
     @staticmethod
     def _describe_bias(bias):
         b_min = bias.min()
         b_max = bias.max()
         b_avg = bias.mean()
-        return ', '.join(
+        return ', '.join([
             f'pattern: {b_min * 100:.2f}-{b_avg * 100:.2f}-{b_max * 100:.2f}'
-        )
+        ])
 
     def describe_weight(self):
         raise NotImplementedError()
@@ -139,7 +139,8 @@ class FullColumn(TNNColumn):
     def get_potentials(self, input_spikes, labels=None):
         # coalesce input channel and synpases
         batch, channel, synapses, time = input_spikes.shape
-        dual_spikes = self.dual(input_spikes).reshape(batch, channel * synapses, time)
+        dual_spikes = self.dual(input_spikes).reshape(
+            batch, channel * synapses, time)
         input_spikes = input_spikes.reshape(batch, channel * synapses, time)
         # perform conv1d to compute potentials
         w_kernel = self.response_function.forward(self.weight)
@@ -156,10 +157,10 @@ class FullColumn(TNNColumn):
         # apply bias
         if labels is not None:
             # apply bias to labeled channels
-            supervision = torch.zeros(batch, self.output_channel, dtype=torch.int32, device=labels.device).scatter(
+            supervision = torch.zeros(batch, self.neurons, dtype=torch.int32, device=labels.device).scatter(
                 1, labels.unsqueeze(-1), 1
-            ).unsqueeze(-1)
-            # supervision (batch, channel, 1)
+            ).unsqueeze(-2)
+            # supervision (batch, 1, neurons)
             potentials = potentials + (
                 supervision * self.theta *
                 self.bias.reshape(1, self.output_channel, self.neurons)
@@ -194,6 +195,7 @@ class FullColumn(TNNColumn):
             potential_t = (potentials[t] * depress_t *
                            k_depress_t).reshape(batch, -1)
             # find channel and neuron winners
+
             cn_winner_t = potential_t.argmax(-1).unsqueeze(-1)
             p_winner_t = potential_t.gather(-1, cn_winner_t)
             spike_t = (p_winner_t > self.theta).int()
@@ -215,12 +217,12 @@ class FullColumn(TNNColumn):
     ):
         batch, _channel, neurons, _time = output_spikes.shape
 
-        total_spikes = output_spikes.sum((0, 3)).reshape(-1, 1)
+        total_spikes = output_spikes.sum((0, 3))
 
         capture_grad, = torch.autograd.grad(
             (potentials * output_spikes).sum(), self.weight, retain_graph=True)
-        capture_grad = capture_grad.min(total_spikes)
-        backoff_grad = total_spikes - capture_grad
+        capture_grad = capture_grad.min(total_spikes.reshape(-1, 1))
+        backoff_grad = total_spikes.reshape(-1, 1) - capture_grad
         search_grad, = torch.autograd.grad(
             potentials.sum() / self.response_function.kernel_size, self.weight)
         search_grad = search_grad * (capture_grad == 0).int()
@@ -233,17 +235,17 @@ class FullColumn(TNNColumn):
             batch * neurons
         )
 
-        bias_update = beta_decay ** total_spikes
+        bias_update = beta_decay ** total_spikes.reshape(-1)
 
         with torch.no_grad():
             self.bias.mul_(bias_update)
             self.weight.add_(weight_update).clip_(0, 1)
 
     def describe_weight(self):
-        return self.describe_weight(self.weight.detach())
+        return self._describe_weight(self.weight.detach())
 
     def describe_bias(self):
-        return self.describe_bias(self.bias)
+        return self._describe_bias(self.bias)
 
 
 class ConvColumn(nn.Module):
@@ -500,4 +502,3 @@ class RecurColumn(nn.Module):
 
         with torch.no_grad():
             self.weight.add_(update).clip_(0, 1)
-
