@@ -157,7 +157,7 @@ class FullColumn(TNNColumn):
         # apply bias
         if labels is not None:
             # apply bias to labeled channels
-            supervision = torch.zeros(batch, self.neurons, dtype=torch.int32, device=labels.device).scatter(
+            supervision = torch.zeros(batch, self.output_channel, dtype=torch.int32, device=labels.device).scatter(
                 1, labels.unsqueeze(-1), 1
             ).unsqueeze(-1)
             # supervision (batch, channel, 1)
