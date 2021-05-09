@@ -139,13 +139,13 @@ class FullColumn(TNNColumn):
     def get_potentials(self, input_spikes, labels=None):
         # coalesce input channel and synpases
         batch, channel, synapses, time = input_spikes.shape
+        dual_spikes = self.dual(input_spikes).reshape(batch, channel * synapses, time)
         input_spikes = input_spikes.reshape(batch, channel * synapses, time)
         # perform conv1d to compute potentials
         w_kernel = self.response_function.forward(self.weight)
         potentials = nn.functional.conv1d(
             input_spikes, w_kernel, padding=self.response_function.padding)
         # apply dual spikes
-        dual_spikes = self.dual(input_spikes)
         with torch.no_grad():
             dual_potentials = nn.functional.conv1d(
                 dual_spikes, w_kernel, padding=self.response_function.padding)
