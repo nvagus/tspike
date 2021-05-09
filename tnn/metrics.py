@@ -138,8 +138,10 @@ class SpikesTracer:
         self.real_labels = []
         self.predicted_labels = []
 
-    def describe_print_clear(self):
+    def describe(self, clear=False):
         accuracy, percision, recall, matrix = self.evaluate()
         print('Accuracy: {:.4f}; Precision: {:.4f}; Recall: {:.4f}'.format(
             accuracy, percision, recall))
         print(matrix)
+        if clear:
+            self.clear()
