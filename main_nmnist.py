@@ -104,7 +104,7 @@ def main(
 
                 test_data_iterator.set_description(
                     '; '.join(
-                        f'{k}: v'
+                        f'{k}: {v}'
                         for k, v in tracer.describe_batch_spikes(output_spikes).items()
                     )
                 )
