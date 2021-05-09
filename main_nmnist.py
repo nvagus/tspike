@@ -1,3 +1,4 @@
+from typing import ItemsView
 import click
 import torch
 from torch.utils.data.dataloader import DataLoader
@@ -86,19 +87,27 @@ def main(
                 accurate = (output_spikes.sum((-3, -2, -1)) > 0).logical_and(
                     output_spikes.sum((-2, -1)).argmax(-1) == label.to(device)).sum()
                 train_data_iterator.set_description(
-                    f'{model.describe()}; {output_spikes.sum()}, {accurate}')
+                    f'{model.describe()}; {output_spikes.sum().int()}, {accurate}')
 
         model.train(mode=False)
         torch.save(model.state_dict(), f'{model_path}_epoch{epoch}')
 
         tracer = SpikesTracer(10)
         with Interrupter():
-            for data, label in tqdm(test_data_loader):
+            test_data_iterator = tqdm(test_data_loader)
+            for data, label in test_data_iterator:
                 input_spikes = data.reshape(-1, 2, x_max * y_max, t_max)
                 output_spikes = model.forward(input_spikes)
 
                 y_preds = tracer.get_predict(output_spikes)
                 tracer.add_sample(label.numpy(), y_preds)
+
+                test_data_iterator.set_description(
+                    '; '.join(
+                        f'{k}: v'
+                        for k, v in tracer.describe_batch_spikes(output_spikes).items()
+                    )
+                )
         tracer.describe()
 
     return 0
