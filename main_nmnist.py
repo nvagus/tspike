@@ -26,13 +26,13 @@ class Interrupter:
 @click.option('-y', '--y-max', default=34)
 @click.option('-t', '--t-max', default=256)
 # spiking control
-@click.option('--dense', default=0.10)
+@click.option('--dense', default=0.04)
 @click.option('--theta', default=0)
 @click.option('--forced-dep', default=0)
 @click.option('--w-init', default=0.30)
 @click.option('--bias', default=0.30)
-@click.option('--step', default=16)
-@click.option('--leak', default=32)
+@click.option('--step', default=8)
+@click.option('--leak', default=64)
 # model structure
 @click.option('--channel', default=1)
 @click.option('--winners', default=1)
