@@ -34,7 +34,7 @@ class Interrupter:
 @click.option('--step', default=8)
 @click.option('--leak', default=64)
 # model structure
-@click.option('--channel', default=1)
+@click.option('--neurons', default=1)
 @click.option('--winners', default=1)
 # learning parameters
 @click.option('--capture', default=0.2000)
@@ -50,7 +50,7 @@ def main(
     x_max, y_max, t_max,
     dense, theta, forced_dep, w_init, bias,
     step, leak,
-    channel, winners,
+    neurons, winners,
     capture, backoff, search, decay,
     train_path, test_path, model_path,
     **kwargs
@@ -67,7 +67,7 @@ def main(
         test_path, x_max, y_max, t_max, device=device), batch_size=batch)
 
     model = FullColumn(
-        x_max * y_max, 10, input_channel=2, output_channel=channel,
+        x_max * y_max, neurons, input_channel=2, output_channel=10,
         step=step, leak=leak, bias=bias, winners=winners,
         fodep=forced_dep, w_init=w_init, theta=theta, dense=dense
     ).to(device)
@@ -84,7 +84,7 @@ def main(
                     mu_capture=capture, mu_backoff=backoff, mu_search=search, beta_decay=decay)
                 # output_spikes: bacth, channel, neuro, time
                 accurate = (output_spikes.sum((-3, -2, -1)) > 0).logical_and(
-                    output_spikes.sum((-3, -1)).argmax(-1) == label.to(device)).sum()
+                    output_spikes.sum((-2, -1)).argmax(-1) == label.to(device)).sum()
                 train_data_iterator.set_description(
                     f'{model.describe()}; {output_spikes.sum()}, {accurate}')
 

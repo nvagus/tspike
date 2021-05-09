@@ -159,8 +159,8 @@ class FullColumn(TNNColumn):
             # apply bias to labeled channels
             supervision = torch.zeros(batch, self.neurons, dtype=torch.int32, device=labels.device).scatter(
                 1, labels.unsqueeze(-1), 1
-            ).unsqueeze(-2)
-            # supervision (batch, 1, neurons)
+            ).unsqueeze(-1)
+            # supervision (batch, channel, 1)
             potentials = potentials + (
                 supervision * self.theta *
                 self.bias.reshape(1, self.output_channel, self.neurons)
