@@ -216,32 +216,32 @@ class FullColumn(TNNColumn):
     def stdp(
         self,
         potentials, output_spikes,
-        alpha_lr, beta_singal, beta_noise,
-        beta_decay, eps=1e-8
+        bias_decay, eps=1e-8
     ):
-        batch, _channel, neurons, _time = output_spikes.shape
-
+        batch, channel, neurons, time = output_spikes.shape
+        
         spiked_potentials = potentials * output_spikes
         with torch.no_grad():
             normed_spiked_potentials = spiked_potentials + eps
-        spiked_potentials = spiked_potentials * self.dense / normed_spiked_potentials
+        spiked_potentials = spiked_potentials * self.theta / normed_spiked_potentials
 
         total_spikes = output_spikes.sum((0, 3))
 
-        capture_grad, = torch.autograd.grad(spiked_potentials.sum(), self.weight, retain_graph=True)
-        backoff_grad = total_spikes.reshape(-1, 1) - capture_grad
-        search_grad, = torch.autograd.grad(potentials.sum(), self.weight)
-        search_grad = search_grad * self.bias / (self.response_function.kernel_size * self.weight + eps)
-        total_grad = capture_grad + backoff_grad + search_grad
+        capture_grad, = torch.autograd.grad(spiked_potentials.sum(), self.weight, retain_graph=False)
+        backoff_grad = - total_spikes.reshape(-1, 1) * self.dense
+        # search_grad, = torch.autograd.grad(potentials.sum(), self.weight)
+        # search_grad = search_grad * self.bias.unsqueeze(-1) / (self.response_function.kernel_size * self.weight + eps)
+        total_grad = capture_grad + backoff_grad # + search_grad
+        total_grad /= batch
 
         with torch.no_grad():
-            bias_update = beta_decay ** total_spikes.reshape(-1)
+            bias_update = bias_decay ** total_spikes.reshape(-1)
             self.bias.mul_(bias_update)
             weight_update = self.optimizer.forward(total_grad)
-            self.weight.add_(weight_update).clip_(min=0)
+            self.weight.add_(weight_update).clip_(min=0, max=16)
 
     def describe_weight(self):
-        return self._describe_weight(self.weight.detach())
+        return self._describe_weight(torch.tanh(self.weight).detach())
 
     def describe_bias(self):
         return self._describe_bias(self.bias)

@@ -78,7 +78,7 @@ def main(
             for data, label in train_data_iterator:
                 input_spikes = data.reshape(-1, 2, x_max * y_max, t_max)
                 output_spikes = model.forward(
-                    input_spikes, label.to(device), beta_decay=decay)
+                    input_spikes, label.to(device), bias_decay=decay)
                 # output_spikes: bacth, channel, neuro, time
                 accurate = (output_spikes.sum((-3, -2, -1)) > 0).logical_and(
                     output_spikes.sum((-2, -1)).argmax(-1) == label.to(device)).sum()
