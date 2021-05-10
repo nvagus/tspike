@@ -133,10 +133,8 @@ class FullColumn(TNNColumn):
     def forward(self, input_spikes, labels=None, bias_decay=0.9999):
         potentials, supervision = self.get_potentials(input_spikes, labels)
         output_spikes = self.winner_takes_all(potentials)
-        if supervision is not None:
-            output_spikes = output_spikes * supervision.unsqueeze(-1)
         if self.training:
-            self.stdp(potentials, output_spikes, bias_decay=bias_decay)
+            self.stdp(potentials, output_spikes, supervision, bias_decay=bias_decay)
 
         return output_spikes
 
@@ -215,11 +213,14 @@ class FullColumn(TNNColumn):
 
     def stdp(
         self,
-        potentials, output_spikes,
+        potentials, output_spikes, supervision,
         bias_decay, eps=1e-8
     ):
         batch, channel, neurons, time = output_spikes.shape
         
+        if supervision is not None:
+            potentials = potentials * supervision.unsqueeze(-1)
+            output_spikes = output_spikes * supervision.unsqueeze(-1)
         spiked_potentials = potentials * output_spikes
         with torch.no_grad():
             normed_spiked_potentials = spiked_potentials + eps
@@ -229,9 +230,10 @@ class FullColumn(TNNColumn):
 
         capture_grad, = torch.autograd.grad(spiked_potentials.sum(), self.weight, retain_graph=False)
         backoff_grad = - total_spikes.reshape(-1, 1) * self.dense
-        # search_grad, = torch.autograd.grad(potentials.sum(), self.weight)
-        # search_grad = search_grad * self.bias.unsqueeze(-1) / (self.response_function.kernel_size * self.weight + eps)
-        total_grad = capture_grad + backoff_grad # + search_grad
+        search_grad, = torch.autograd.grad(potentials.sum(), self.weight)
+        search_grad = search_grad / (self.response_function.kernel_size * self.weight + eps)
+        search_grad = search_grad / self.neurons * (self.bias * self.dense / (search_grad.sum(-1) + eps)).unsqueeze(-1)
+        total_grad = capture_grad + backoff_grad + search_grad
         total_grad /= batch
 
         with torch.no_grad():
