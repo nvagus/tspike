@@ -218,13 +218,13 @@ class FullColumn(TNNColumn):
     ):
         batch, channel, neurons, time = output_spikes.shape
         
-        if supervision is not None:
-            potentials = potentials * supervision.unsqueeze(-1)
-            output_spikes = output_spikes * supervision.unsqueeze(-1)
         spiked_potentials = potentials * output_spikes
         with torch.no_grad():
             normed_spiked_potentials = spiked_potentials + eps
         spiked_potentials = spiked_potentials * self.theta / normed_spiked_potentials
+
+        if supervision is not None:
+            spiked_potentials = spiked_potentials * (2 * supervision - 1).unsqueeze(-1)
 
         total_spikes = output_spikes.sum((0, 3))
 
