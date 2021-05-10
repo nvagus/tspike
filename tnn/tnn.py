@@ -228,7 +228,7 @@ class FullColumn(TNNColumn):
 
         total_spikes = output_spikes.sum((0, 3))
 
-        capture_grad, = torch.autograd.grad(spiked_potentials.sum(), self.weight, retain_graph=False)
+        capture_grad, = torch.autograd.grad(spiked_potentials.sum(), self.weight, retain_graph=True)
         backoff_grad = - total_spikes.reshape(-1, 1) * self.dense
         search_grad, = torch.autograd.grad(potentials.sum(), self.weight)
         search_grad = search_grad / (self.response_function.kernel_size * self.weight + eps)
