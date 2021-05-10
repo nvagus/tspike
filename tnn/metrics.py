@@ -68,19 +68,32 @@ class SpikesTracer:
     def describe_batch_spikes(self, output_spikes):
         # output_spikes - batch, output_channel, neuro, time
 
-        batch_summed_output = output_spikes.sum(0)
-
-        # has spikes
-        has_spikes = torch.any(batch_summed_output).item()
+        # has spike. the average number of 'if there is a spike' for the batch
+        has_spikes = torch.mean((output_spikes.sum((1, 2, 3)) > 0).float())
 
         # spike time
-        spike_time = batch_summed_output.sum(
-            (0, 1)).nonzero().float().squeeze(-1)
-        avg_spike_time = torch.mean(spike_time).item()
-        last_spike_time = torch.max(spike_time).item()
+        # first spike time, the average number of the first spike time for the batch
+        # last spike time, the average number of the last spike time for the batch
+        # output_spikes - batch, output_channel, neuro, time
+        batched_spikes = output_spikes.sum((1, 2))
 
-        # total_number_of_spikes per channel
-        channel_summed_spikes = batch_summed_output.sum((1, 2))
+        # filter none spike batch_id
+        batched_spikes = batched_spikes[torch.sum(batched_spikes, 1) > 0]
+
+        idx_0 = torch.arange(
+            1, batched_spikes.shape[1]+1, 1, device=batched_spikes.device).unsqueeze(0)
+        idx_1 = torch.arange(
+            batched_spikes.shape[1], 0, -1, device=batched_spikes.device).unsqueeze(0)
+
+        batched_spikes_0 = batched_spikes * idx_0
+        batched_spikes_1 = batched_spikes * idx_1
+
+        first_spike_time_avg = torch.argmax(
+            batched_spikes_1, 1).float().mean()  # first non-zero spikes
+        last_spike_time_avg = torch.argmax(batched_spikes_0, 1).float().mean()
+
+        # num spike, the average number of spikes for the batch
+        num_spikes = output_spikes.sum((1, 2, 3)).mean()
 
         # argmax spike channel
         time_summed_spikes = output_spikes.sum(
@@ -90,11 +103,9 @@ class SpikesTracer:
 
         result = {}
         result["has_spike"] = has_spikes
-        result["avg_spike_time"] = avg_spike_time
-        result["last_spike_time"] = last_spike_time
-        result["channel_summed_spikes"] = channel_summed_spikes.cpu().numpy()
-        result["channel_argmax"] = channel_argmax.cpu().numpy()
-
+        result["num_spikes"] = num_spikes.cpu().numpy()
+        result["first_spike_time"] = first_spike_time_avg
+        result["last_spike_time"] = last_spike_time_avg
         return result
 
     def get_predict(self, output_spikes):
