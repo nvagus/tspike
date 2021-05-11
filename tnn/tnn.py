@@ -26,7 +26,7 @@ class StepFireLeakKernel(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         kernel, = ctx.saved_tensors
-        return (grad_output * kernel).sum(-1), None, None
+        return (grad_output * (kernel + 1e-8)).sum(-1), None, None
 
 
 class StepFireLeak(nn.Module):
@@ -88,7 +88,7 @@ class FullColumn(TNNColumn):
         synapses, neurons, input_channel=1, output_channel=1,
         step=16, leak=32, bias=0.5, winners=None,
         fodep=None, w_init=None, theta=None, dense=None,
-        alpha=0.1, beta1=0.99, beta2=0.999
+        alpha=0.02, beta1=0.99, beta2=0.999
     ):
         super(FullColumn, self).__init__()
         # model skeleton parameters
@@ -224,6 +224,7 @@ class FullColumn(TNNColumn):
         spiked_potentials = spiked_potentials * self.theta / normed_spiked_potentials
 
         if supervision is not None:
+            potentials = potentials * supervision.unsqueeze(-1)
             spiked_potentials = spiked_potentials * (2 * supervision - 1).unsqueeze(-1)
 
         total_spikes = output_spikes.sum((0, 3))
