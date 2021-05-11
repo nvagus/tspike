@@ -88,7 +88,7 @@ class FullColumn(TNNColumn):
         synapses, neurons, input_channel=1, output_channel=1,
         step=16, leak=32, bias=0.5, winners=None,
         fodep=None, w_init=None, theta=None, dense=None,
-        alpha1=0.05, alpha2=0.02, beta1=0.99, beta2=0.999
+        alpha1=0.02, alpha2=0.02, beta1=0.99, beta2=0.999
     ):
         super(FullColumn, self).__init__()
         # model skeleton parameters
