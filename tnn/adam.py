@@ -31,10 +31,10 @@ class AdamBSTDP(nn.Module):
         self.beta2 = nn.parameter.Parameter(torch.tensor(beta2))
 
     def forward(self, spikes, bias, capture, search, eps=1e-8):
-        self.moment1_capture.set_(self.moment1_capture * self.beta1 ** spikes + capture * (1 - self.beta1) ** spikes)
-        self.moment2_capture.set_(self.moment2_capture * self.beta2 ** spikes + capture ** 2 * (1 - self.beta2) ** spikes)
-        self.moment1_search.set_(self.moment1_search * self.beta1 + search * (1 - self.beta1) ** spikes)
-        self.moment2_search.set_(self.moment2_search * self.beta2 + search ** 2 * (1 - self.beta2) ** spikes)
+        self.moment1_capture.set_(self.moment1_capture * self.beta1 ** spikes + capture * (1 - self.beta1 ** spikes))
+        self.moment2_capture.set_(self.moment2_capture * self.beta2 ** spikes + capture ** 2 * (1 - self.beta2 ** spikes))
+        self.moment1_search.set_(self.moment1_search * self.beta1 + search * (1 - self.beta1 ** spikes))
+        self.moment2_search.set_(self.moment2_search * self.beta2 + search ** 2 * (1 - self.beta2 ** spikes))
         snr_capture = self.moment1_capture / (self.moment2_capture.sqrt() + eps)
         snr_search = self.moment1_search / (self.moment2_search.sqrt() + eps)
         return self.alpha1 * snr_capture + self.alpha2 * bias * snr_search
