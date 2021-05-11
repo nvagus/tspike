@@ -4,7 +4,7 @@ import torch.nn as nn
 from torch.distributions.exponential import Exponential
 
 from .dual import SignalDualBackground
-from .adam import AdamSTDP
+from .adam import AdamBSTDP
 
 
 class StepFireLeakKernel(torch.autograd.Function):
@@ -26,7 +26,7 @@ class StepFireLeakKernel(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         kernel, = ctx.saved_tensors
-        return (grad_output * kernel).sum(-1), None, None
+        return (grad_output * (kernel + 1e-8)).sum(-1), None, None
 
 
 class StepFireLeak(nn.Module):
@@ -88,7 +88,7 @@ class FullColumn(TNNColumn):
         synapses, neurons, input_channel=1, output_channel=1,
         step=16, leak=32, bias=0.5, winners=None,
         fodep=None, w_init=None, theta=None, dense=None,
-        alpha=0.1, beta1=0.99, beta2=0.999
+        alpha1=0.05, alpha2=0.01, beta1=0.99, beta2=0.999
     ):
         super(FullColumn, self).__init__()
         # model skeleton parameters
@@ -120,7 +120,7 @@ class FullColumn(TNNColumn):
             requires_grad=True
         )
         self.dual = SignalDualBackground()
-        self.optimizer = AdamSTDP(self.weight, alpha, beta1, beta2)
+        self.optimizer = AdamBSTDP(self.weight, alpha1, alpha2, beta1, beta2)
         print(
             'Building full connected TNN layer with '
             f'theta={theta:.4f}, '
@@ -218,28 +218,31 @@ class FullColumn(TNNColumn):
     ):
         batch, channel, neurons, time = output_spikes.shape
         
-        if supervision is not None:
-            potentials = potentials * supervision.unsqueeze(-1)
-            output_spikes = output_spikes * supervision.unsqueeze(-1)
         spiked_potentials = potentials * output_spikes
         with torch.no_grad():
             normed_spiked_potentials = spiked_potentials + eps
         spiked_potentials = spiked_potentials * self.theta / normed_spiked_potentials
 
+        if supervision is not None:
+            potentials = potentials * supervision.unsqueeze(-1)
+            spiked_potentials = spiked_potentials * (2 * supervision - 1).unsqueeze(-1)
+
         total_spikes = output_spikes.sum((0, 3))
 
-        capture_grad, = torch.autograd.grad(spiked_potentials.sum(), self.weight, retain_graph=False)
+        capture_grad, = torch.autograd.grad(spiked_potentials.sum(), self.weight, retain_graph=True)
         backoff_grad = - total_spikes.reshape(-1, 1) * self.dense
         search_grad, = torch.autograd.grad(potentials.sum(), self.weight)
-        search_grad = search_grad / (self.response_function.kernel_size * self.weight + eps)
-        search_grad = search_grad / self.neurons * (self.bias * self.dense / (search_grad.sum(-1) + eps)).unsqueeze(-1)
-        total_grad = capture_grad + backoff_grad + search_grad
-        total_grad /= batch
+        search_grad = search_grad / (self.weight + eps)
 
         with torch.no_grad():
             bias_update = bias_decay ** total_spikes.reshape(-1)
             self.bias.mul_(bias_update)
-            weight_update = self.optimizer.forward(total_grad)
+            weight_update = self.optimizer.forward(
+                total_spikes.reshape(-1, 1),
+                self.bias.unsqueeze(-1),
+                capture_grad + backoff_grad,
+                search_grad
+            )
             self.weight.add_(weight_update).clip_(min=0, max=16)
 
     def describe_weight(self):
