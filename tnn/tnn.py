@@ -4,11 +4,13 @@ import torch.nn as nn
 from torch.distributions.exponential import Exponential
 
 from .dual import SignalDualBackground
+from .adam import AdamBSTDP
 
 
 class StepFireLeakKernel(torch.autograd.Function):
     @staticmethod
     def forward(ctx, weight, step, leak):
+        weight = torch.tanh(weight)
         kernel_size = step + leak
         kernel_zero = torch.zeros(
             *weight.shape, kernel_size, device=weight.device)
@@ -18,11 +20,13 @@ class StepFireLeakKernel(torch.autograd.Function):
         t_leak = -(t_axis - weight.unsqueeze(-1) * step) / \
             leak + weight.unsqueeze(-1)
         kernel = kernel_zero.max(t_spike.min(t_leak)).flip(-1)
+        ctx.save_for_backward(kernel)
         return kernel
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output.sum(-1), None, None
+        kernel, = ctx.saved_tensors
+        return (grad_output * (kernel + 1e-8)).sum(-1), None, None
 
 
 class StepFireLeak(nn.Module):
@@ -83,7 +87,8 @@ class FullColumn(TNNColumn):
         self,
         synapses, neurons, input_channel=1, output_channel=1,
         step=16, leak=32, bias=0.5, winners=None,
-        fodep=None, w_init=None, theta=None, dense=None
+        fodep=None, w_init=None, theta=None, dense=None,
+        alpha1=0.02, alpha2=0.02, beta1=0.99, beta2=0.999
     ):
         super(FullColumn, self).__init__()
         # model skeleton parameters
@@ -105,14 +110,17 @@ class FullColumn(TNNColumn):
         self.winners = winners = winners or neurons
 
         # initialize weight and bias
-        self.bias = nn.parameter.Parameter(torch.zeros(
-            self.output_channel * self.neurons) + bias, requires_grad=False)
+        self.bias = nn.parameter.Parameter(
+            torch.zeros(self.output_channel * self.neurons) + bias, 
+            requires_grad=False
+        )
         self.weight = nn.parameter.Parameter(
             Exponential(1 / w_init).sample(
-                (self.output_channel * self.neurons, self.input_channel * self.synapses)).clip(0, 1),
+                (self.output_channel * self.neurons, self.input_channel * self.synapses)).clip(min=0),
             requires_grad=True
         )
         self.dual = SignalDualBackground()
+        self.optimizer = AdamBSTDP(self.weight, alpha1, alpha2, beta1, beta2)
         print(
             'Building full connected TNN layer with '
             f'theta={theta:.4f}, '
@@ -122,17 +130,11 @@ class FullColumn(TNNColumn):
             f'bias={bias}'
         )
 
-    def forward(self, input_spikes, labels=None, mu_capture=0.20, mu_backoff=-0.20, mu_search=0.001, beta_decay=0.9999):
+    def forward(self, input_spikes, labels=None, bias_decay=0.9999):
         potentials, supervision = self.get_potentials(input_spikes, labels)
         output_spikes = self.winner_takes_all(potentials)
-        if supervision is not None:
-            output_spikes = output_spikes * supervision.unsqueeze(-1)
         if self.training:
-            self.stdp(
-                potentials, output_spikes,
-                mu_capture=mu_capture, mu_backoff=mu_backoff, mu_search=mu_search,
-                beta_decay=beta_decay
-            )
+            self.stdp(potentials, output_spikes, supervision, bias_decay=bias_decay)
 
         return output_spikes
 
@@ -182,9 +184,11 @@ class FullColumn(TNNColumn):
         # time to step out of depression, with initial 0 and constrains >= 0
         depression = torch.zeros(
             batch, neurons, dtype=torch.int32, device=potentials.device)
+        
         # return winners of the same shape as potentials
-        winners = torch.zeros(time, batch, neurons, channel,
-                              dtype=torch.int32, device=potentials.device)
+        winners = torch.zeros(
+            time, batch, neurons, channel,
+            dtype=torch.int32, device=potentials.device)
 
         # iterate time axis: get the winner for each batch, channel of neurons, update winners and depression
         for t in range(time):
@@ -195,11 +199,9 @@ class FullColumn(TNNColumn):
             potential_t = (potentials[t] * depress_t *
                            k_depress_t).reshape(batch, -1)
             # find channel and neuron winners
-
             cn_winner_t = potential_t.argmax(-1).unsqueeze(-1)
             p_winner_t = potential_t.gather(-1, cn_winner_t)
             spike_t = (p_winner_t > self.theta).int()
-
             # set winner@t
             winners[t] = winners[t].reshape(
                 batch, -1).scatter(-1, cn_winner_t, spike_t).reshape(batch, neurons, -1)
@@ -211,38 +213,40 @@ class FullColumn(TNNColumn):
 
     def stdp(
         self,
-        potentials, output_spikes,
-        mu_capture, mu_backoff, mu_search,
-        beta_decay
+        potentials, output_spikes, supervision,
+        bias_decay, eps=1e-8
     ):
-        batch, _channel, neurons, _time = output_spikes.shape
+        batch, channel, neurons, time = output_spikes.shape
+        
+        spiked_potentials = potentials * output_spikes
+        with torch.no_grad():
+            normed_spiked_potentials = spiked_potentials + eps
+        spiked_potentials = spiked_potentials * self.theta / normed_spiked_potentials
+
+        if supervision is not None:
+            potentials = potentials * supervision.unsqueeze(-1)
+            spiked_potentials = spiked_potentials * (2 * supervision - 1).unsqueeze(-1)
 
         total_spikes = output_spikes.sum((0, 3))
 
-        capture_grad, = torch.autograd.grad(
-            (potentials * output_spikes).sum(), self.weight, retain_graph=True)
-        capture_grad = capture_grad.min(total_spikes.reshape(-1, 1))
-        backoff_grad = total_spikes.reshape(-1, 1) - capture_grad
-        search_grad, = torch.autograd.grad(
-            potentials.sum() / self.response_function.kernel_size, self.weight)
-        search_grad = search_grad * (capture_grad == 0).int()
-
-        weight_update = (
-            capture_grad * mu_capture * (1 - torch.tanh(self.weight)) +
-            backoff_grad * mu_backoff +
-            search_grad * mu_search * self.bias.unsqueeze(-1)
-        ) / (
-            batch * neurons
-        )
-
-        bias_update = beta_decay ** total_spikes.reshape(-1)
+        capture_grad, = torch.autograd.grad(spiked_potentials.sum(), self.weight, retain_graph=True)
+        backoff_grad = - total_spikes.reshape(-1, 1) * self.dense
+        search_grad, = torch.autograd.grad(potentials.sum(), self.weight)
+        search_grad = search_grad / (self.weight + eps)
 
         with torch.no_grad():
+            bias_update = bias_decay ** total_spikes.reshape(-1)
             self.bias.mul_(bias_update)
-            self.weight.add_(weight_update).clip_(0, 1)
+            weight_update = self.optimizer.forward(
+                total_spikes.reshape(-1, 1),
+                self.bias.unsqueeze(-1),
+                capture_grad + backoff_grad,
+                search_grad
+            )
+            self.weight.add_(weight_update).clip_(min=0, max=16)
 
     def describe_weight(self):
-        return self._describe_weight(self.weight.detach())
+        return self._describe_weight(torch.tanh(self.weight).detach())
 
     def describe_bias(self):
         return self._describe_bias(self.bias)
