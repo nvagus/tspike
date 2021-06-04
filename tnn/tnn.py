@@ -5,41 +5,7 @@ from torch.distributions.exponential import Exponential
 
 from .dual import SignalDualBackground
 from .adam import AdamSTDP
-
-
-class StepFireLeakKernel(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, weight, step, leak):
-        weight = torch.tanh(weight)
-        kernel_size = step + leak
-        kernel_zero = torch.zeros(
-            *weight.shape, kernel_size, device=weight.device)
-        t_axis = torch.arange(
-            kernel_size, device=weight.device).expand_as(kernel_zero)
-        t_spike = t_axis / step
-        t_leak = -(t_axis - weight.unsqueeze(-1) * step) / \
-            leak + weight.unsqueeze(-1)
-        kernel = kernel_zero.max(t_spike.min(t_leak)).flip(-1)
-        ctx.save_for_backward(kernel)
-        return kernel
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        kernel, = ctx.saved_tensors
-        return (grad_output * (kernel + 1e-8)).sum(-1), None, None
-
-
-class StepFireLeak(nn.Module):
-    def __init__(self, step=16, leak=32):
-        super(StepFireLeak, self).__init__()
-        self.step = step
-        self.leak = leak
-        self.kernel_size = step + leak
-        self.padding = self.kernel_size
-        self.fodep = self.kernel_size
-
-    def forward(self, weight):
-        return StepFireLeakKernel.apply(weight, self.step, self.leak)
+from .response import StepFireLeak
 
 
 class TNNColumn(nn.Module):
@@ -86,11 +52,12 @@ class FullColumn(TNNColumn):
     def __init__(
         self,
         synapses, neurons, input_channel=1, output_channel=1,
-        step=16, leak=32, bias=0.5, winners=None,
-        fodep=None, w_init=None, theta=None, dense=None,
+        step=16, leak=32, w_init=0.01, b_init=0.3, 
+        theta=None, dense=None, winners=None, inhib=None, 
         alpha=0.02, beta1=0.99, beta2=0.999
     ):
         super(FullColumn, self).__init__()
+
         # model skeleton parameters
         self.synapses = synapses
         self.neurons = neurons
@@ -99,24 +66,22 @@ class FullColumn(TNNColumn):
 
         # threshold parameters
         assert theta or dense, 'either theta or dense should be specified'
-        self.theta = theta = theta or dense * (synapses * input_channel)
-        self.dense = dense = dense or theta / (synapses * input_channel)
-        w_init = w_init or dense
+        self.theta = theta = theta or dense * synapses
+        self.dense = dense = dense or theta / synapses
 
         # spiking control parameters
         self.response_function = StepFireLeak(step, leak)
-        self.fodep = fodep = fodep or self.response_function.fodep
-        assert fodep >= self.response_function.fodep, f'forced depression should be at least {self.response_function.fodep}'
+        self.inhib = inhib = inhib or self.response_function.inhib
+        assert inhib >= self.response_function.inhib, f'inhibition period should be at least {self.response_function.inhib}'
         self.winners = winners = winners or neurons
 
         # initialize weight and bias
         self.bias = nn.parameter.Parameter(
-            torch.zeros(self.output_channel * self.neurons) + bias, 
+            torch.zeros(self.output_channel * self.neurons) + b_init, 
             requires_grad=False
         )
         self.weight = nn.parameter.Parameter(
-            Exponential(1 / w_init).sample(
-                (self.output_channel * self.neurons, self.input_channel * self.synapses)).clip(min=0),
+            Exponential(1 / w_init).sample((self.output_channel * self.neurons, self.input_channel * self.synapses)).clip(min=0),
             requires_grad=True
         )
         self.dual = SignalDualBackground()
@@ -125,9 +90,8 @@ class FullColumn(TNNColumn):
             'Building full connected TNN layer with '
             f'theta={theta:.4f}, '
             f'dense={dense:.4f}, '
-            f'fodep={fodep}, ',
+            f'inhib={inhib}, ',
             f'winners={winners}, '
-            f'bias={bias}'
         )
 
     def forward(self, input_spikes, labels=None, bias_decay=0.9999):
@@ -206,8 +170,8 @@ class FullColumn(TNNColumn):
             winners[t] = winners[t].reshape(
                 batch, -1).scatter(-1, cn_winner_t, spike_t).reshape(batch, neurons, -1)
             # update depression
-            depression += winners[t].sum(-1) * self.fodep
-            depression = (depression - 1).clip(0, self.fodep - 1)
+            depression += winners[t].sum(-1) * self.inhib
+            depression = (depression - 1).clip(0, self.inhib - 1)
 
         return winners.permute(1, 3, 2, 0).float()
 
@@ -258,7 +222,7 @@ class ConvColumn(nn.Module):
         input_channel=1, output_channel=1,
         kernel=3, stride=2,
         step=16, leak=32, bias=0.5, winners=0.5,
-        fodep=None, w_init=None, theta=None, dense=None
+        inhib=None, w_init=None, theta=None, dense=None
     ):
         super(ConvColumn, self).__init__()
         # model skeleton parameters
@@ -277,8 +241,8 @@ class ConvColumn(nn.Module):
 
         # spiking control parameters
         self.response_function = StepFireLeak(step, leak)
-        self.fodep = fodep = fodep or self.response_function.fodep
-        assert fodep >= self.response_function.fodep, f'forced depression should be at least {self.response_function.fodep}'
+        self.inhib = inhib = inhib or self.response_function.inhib
+        assert inhib >= self.response_function.inhib, f'forced depression should be at least {self.response_function.inhib}'
         self.winners = winners
 
         # initialize weight and bias
@@ -293,7 +257,7 @@ class ConvColumn(nn.Module):
             'Building convolutional connected TNN layer with '
             f'theta={theta:.4f}, '
             f'dense={dense:.4f}, '
-            f'fodep={fodep}, ',
+            f'inhib={inhib}, ',
             f'winners={winners}, '
             f'bias={bias}'
         )
@@ -330,17 +294,17 @@ class ConvColumn(nn.Module):
         # return winners of the same shape as potentials
         winners = torch.zeros(time, batch, neuron_x * neuron_y,
                               channel, dtype=torch.int32, device=potentials.device)
-        winner_fodep = np.ceil(self.winners * neuron_x * neuron_y)
+        winner_inhib = np.ceil(self.winners * neuron_x * neuron_y)
         for t in range(time):
             depress_t = (depression == 0).unsqueeze(-1).int()
             k_depress_t = ((depression != 0).sum(-1) <
-                           winner_fodep).int().reshape(-1, 1, 1)
+                           winner_inhib).int().reshape(-1, 1, 1)
             potential_t = potentials[t] * depress_t * k_depress_t
             winner_t = potential_t.argmax(-1).unsqueeze(-1)
             spike_t = (potential_t.gather(-1, winner_t) > self.theta).int()
             winners[t].scatter_(-1, winner_t, spike_t)
-            depression += winners[t].sum(-1) * self.fodep
-            depression = (depression - 1).clip(0, self.fodep - 1)
+            depression += winners[t].sum(-1) * self.inhib
+            depression = (depression - 1).clip(0, self.inhib - 1)
 
         return winners.permute(1, 3, 2, 0).reshape(batch, channel, neuron_x, neuron_y, time).float()
 

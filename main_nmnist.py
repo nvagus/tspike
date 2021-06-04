@@ -28,17 +28,17 @@ class Interrupter:
 @click.option('-t', '--t-max', default=256)
 # spiking control
 @click.option('--dense', default=0.04)
-@click.option('--theta', default=0.)
-@click.option('--forced-dep', default=1024)
-@click.option('--w-init', default=0.)
-@click.option('--bias', default=0.30)
+@click.option('--theta', default=0.0)
+@click.option('--inhib', default=1024)
+@click.option('--w-init', default=0.01)
+@click.option('--b-init', default=0.30)
 @click.option('--step', default=8)
 @click.option('--leak', default=64)
 # model structure
 @click.option('--neurons', default=1)
 @click.option('--winners', default=1)
 # learning parameters
-@click.option('--decay', default=0.9999)
+@click.option('--decay', default=0.999)
 # paths
 @click.option('--train-path', default='data/n-mnist/TrainSP')
 @click.option('--test-path', default='data/n-mnist/TestSP')
@@ -46,7 +46,7 @@ class Interrupter:
 def main(
     gpu, batch, epochs,
     x_max, y_max, t_max,
-    dense, theta, forced_dep, w_init, bias,
+    dense, theta, inhib, w_init, b_init,
     step, leak,
     neurons, winners,
     decay,
@@ -66,8 +66,8 @@ def main(
 
     model = FullColumn(
         x_max * y_max, neurons, input_channel=2, output_channel=10,
-        step=step, leak=leak, bias=bias, winners=winners,
-        fodep=forced_dep, w_init=w_init, theta=theta, dense=dense
+        step=step, leak=leak, b_init=b_init, w_init=w_init,
+         theta=theta, dense=dense, winners=winners, inhib=inhib
     ).to(device)
 
     for epoch in range(epochs):
