@@ -4,7 +4,7 @@ import torch.nn as nn
 from torch.distributions.exponential import Exponential
 
 from .dual import SignalDualBackground
-from .adam import AdamBSTDP
+from .adam import AdamSTDP
 
 
 class StepFireLeakKernel(torch.autograd.Function):
@@ -88,7 +88,7 @@ class FullColumn(TNNColumn):
         synapses, neurons, input_channel=1, output_channel=1,
         step=16, leak=32, bias=0.5, winners=None,
         fodep=None, w_init=None, theta=None, dense=None,
-        alpha1=0.02, alpha2=0.02, beta1=0.99, beta2=0.999
+        alpha=0.02, beta1=0.99, beta2=0.999
     ):
         super(FullColumn, self).__init__()
         # model skeleton parameters
@@ -120,7 +120,7 @@ class FullColumn(TNNColumn):
             requires_grad=True
         )
         self.dual = SignalDualBackground()
-        self.optimizer = AdamBSTDP(self.weight, alpha1, alpha2, beta1, beta2)
+        self.optimizer = AdamSTDP(self.weight, alpha, beta1, beta2)
         print(
             'Building full connected TNN layer with '
             f'theta={theta:.4f}, '

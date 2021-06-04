@@ -28,9 +28,9 @@ class Interrupter:
 @click.option('-t', '--t-max', default=256)
 # spiking control
 @click.option('--dense', default=0.04)
-@click.option('--theta', default=0)
+@click.option('--theta', default=0.)
 @click.option('--forced-dep', default=1024)
-@click.option('--w-init', default=0.30)
+@click.option('--w-init', default=0.)
 @click.option('--bias', default=0.30)
 @click.option('--step', default=8)
 @click.option('--leak', default=64)
